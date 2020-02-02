@@ -5,8 +5,8 @@
 /*                           GODOT ENGINE                                */
 /*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2019 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2019 Godot Engine contributors (cf. AUTHORS.md)    */
+/* Copyright (c) 2007-2020 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2020 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -32,18 +32,15 @@
 
 #include "core/io/resource_saver.h"
 #include "editor/editor_node.h"
-#include "scene/resources/packed_scene.h"
-
 #include "scene/3d/collision_shape.h"
 #include "scene/3d/mesh_instance.h"
 #include "scene/3d/navigation.h"
 #include "scene/3d/physics_body.h"
-#include "scene/3d/portal.h"
-#include "scene/3d/room_instance.h"
 #include "scene/3d/vehicle_body.h"
 #include "scene/animation/animation_player.h"
 #include "scene/resources/animation.h"
 #include "scene/resources/box_shape.h"
+#include "scene/resources/packed_scene.h"
 #include "scene/resources/plane_shape.h"
 #include "scene/resources/ray_shape.h"
 #include "scene/resources/resource_format_text.h"
@@ -1178,7 +1175,7 @@ void ResourceImporterScene::get_import_options(List<ImportOption> *r_options, in
 	r_options->push_back(ImportOption(PropertyInfo(Variant::BOOL, "animation/import", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_UPDATE_ALL_IF_MODIFIED), true));
 	r_options->push_back(ImportOption(PropertyInfo(Variant::REAL, "animation/fps", PROPERTY_HINT_RANGE, "1,120,1"), 15));
 	r_options->push_back(ImportOption(PropertyInfo(Variant::STRING, "animation/filter_script", PROPERTY_HINT_MULTILINE_TEXT), ""));
-	r_options->push_back(ImportOption(PropertyInfo(Variant::INT, "animation/storage", PROPERTY_HINT_ENUM, "Built-In,Files (.anim),Files (.tres)"), animations_out ? true : false));
+	r_options->push_back(ImportOption(PropertyInfo(Variant::INT, "animation/storage", PROPERTY_HINT_ENUM, "Built-In,Files (.anim),Files (.tres)", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_UPDATE_ALL_IF_MODIFIED), animations_out));
 	r_options->push_back(ImportOption(PropertyInfo(Variant::BOOL, "animation/keep_custom_tracks"), animations_out));
 	r_options->push_back(ImportOption(PropertyInfo(Variant::BOOL, "animation/optimizer/enabled", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_UPDATE_ALL_IF_MODIFIED), true));
 	r_options->push_back(ImportOption(PropertyInfo(Variant::REAL, "animation/optimizer/max_linear_error"), 0.05));
@@ -1418,7 +1415,7 @@ Error ResourceImporterScene::import(const String &p_source_file, const String &p
 			DirAccess *da = DirAccess::open(base_path);
 			Error err2 = da->make_dir(subdir_name);
 			memdelete(da);
-			ERR_FAIL_COND_V(err2 != OK && err2 != ERR_ALREADY_EXISTS, err2);
+			ERR_FAIL_COND_V_MSG(err2 != OK && err2 != ERR_ALREADY_EXISTS, err2, "Cannot make directory '" + subdir_name + "'.");
 			base_path = base_path.plus_file(subdir_name);
 		}
 	}
@@ -1514,7 +1511,7 @@ Error ResourceImporterScene::import(const String &p_source_file, const String &p
 			Ref<PackedScene> packer = memnew(PackedScene);
 			packer->pack(child);
 			err = ResourceSaver::save(path, packer); //do not take over, let the changed files reload themselves
-			ERR_FAIL_COND_V(err != OK, err);
+			ERR_FAIL_COND_V_MSG(err != OK, err, "Cannot save scene to file '" + path + "'.");
 		}
 	}
 
@@ -1522,7 +1519,7 @@ Error ResourceImporterScene::import(const String &p_source_file, const String &p
 	packer->pack(scene);
 	print_verbose("Saving scene to: " + p_save_path + ".scn");
 	err = ResourceSaver::save(p_save_path + ".scn", packer); //do not take over, let the changed files reload themselves
-	ERR_FAIL_COND_V(err != OK, err);
+	ERR_FAIL_COND_V_MSG(err != OK, err, "Cannot save scene to file '" + p_save_path + ".scn'.");
 
 	memdelete(scene);
 
@@ -1549,7 +1546,7 @@ Node *EditorSceneImporterESCN::import_scene(const String &p_path, uint32_t p_fla
 
 	Error error;
 	Ref<PackedScene> ps = ResourceFormatLoaderText::singleton->load(p_path, p_path, &error);
-	ERR_FAIL_COND_V(!ps.is_valid(), NULL);
+	ERR_FAIL_COND_V_MSG(!ps.is_valid(), NULL, "Cannot load scene as text resource from path '" + p_path + "'.");
 
 	Node *scene = ps->instance();
 	ERR_FAIL_COND_V(!scene, NULL);

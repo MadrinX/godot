@@ -5,8 +5,8 @@
 /*                           GODOT ENGINE                                */
 /*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2019 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2019 Godot Engine contributors (cf. AUTHORS.md)    */
+/* Copyright (c) 2007-2020 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2020 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -75,6 +75,7 @@ public:
 		EMISSION_SHAPE_RECTANGLE,
 		EMISSION_SHAPE_POINTS,
 		EMISSION_SHAPE_DIRECTED_POINTS,
+		EMISSION_SHAPE_MAX
 	};
 
 private:
@@ -153,7 +154,6 @@ private:
 
 	Vector2 direction;
 	float spread;
-	float flatness;
 
 	float parameters[PARAM_MAX];
 	float randomness[PARAM_MAX];
@@ -174,6 +174,7 @@ private:
 
 	Vector2 gravity;
 
+	void _update_internal();
 	void _particles_process(float p_delta);
 	void _update_particle_data_buffer();
 
@@ -240,9 +241,6 @@ public:
 
 	void set_spread(float p_spread);
 	float get_spread() const;
-
-	void set_flatness(float p_flatness);
-	float get_flatness() const;
 
 	void set_param(Parameter p_param, float p_value);
 	float get_param(Parameter p_param) const;

@@ -5,8 +5,8 @@
 /*                           GODOT ENGINE                                */
 /*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2019 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2019 Godot Engine contributors (cf. AUTHORS.md)    */
+/* Copyright (c) 2007-2020 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2020 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -30,21 +30,22 @@
 
 #include "video_stream_webm.h"
 
-#include "OpusVorbisDecoder.hpp"
-#include "VPXDecoder.hpp"
-#include <vpx/vpx_image.h>
-
-#include "mkvparser/mkvparser.h"
-
 #include "core/os/file_access.h"
 #include "core/os/os.h"
 #include "core/project_settings.h"
+#include "servers/audio_server.h"
 
 #include "thirdparty/misc/yuv2rgb.h"
 
-#include "servers/audio_server.h"
+// libsimplewebm
+#include <OpusVorbisDecoder.hpp>
+#include <VPXDecoder.hpp>
 
-#include <string.h>
+// libvpx
+#include <vpx/vpx_image.h>
+
+// libwebm
+#include <mkvparser/mkvparser.h>
 
 class MkvReader : public mkvparser::IMkvReader {
 
@@ -230,7 +231,7 @@ void VideoStreamPlaybackWebm::set_audio_track(int p_idx) {
 	audio_track = p_idx;
 }
 
-Ref<Texture> VideoStreamPlaybackWebm::get_texture() {
+Ref<Texture> VideoStreamPlaybackWebm::get_texture() const {
 
 	return texture;
 }
@@ -335,22 +336,22 @@ void VideoStreamPlaybackWebm::update(float p_delta) {
 						} else if (image.chromaShiftW == 1 && image.chromaShiftH == 1) {
 
 							yuv420_2_rgb8888(w.ptr(), image.planes[0], image.planes[1], image.planes[2], image.w, image.h, image.linesize[0], image.linesize[1], image.w << 2);
-							// 								libyuv::I420ToARGB(image.planes[0], image.linesize[0], image.planes[2], image.linesize[2], image.planes[1], image.linesize[1], w.ptr(), image.w << 2, image.w, image.h);
+							//libyuv::I420ToARGB(image.planes[0], image.linesize[0], image.planes[2], image.linesize[2], image.planes[1], image.linesize[1], w.ptr(), image.w << 2, image.w, image.h);
 							converted = true;
 						} else if (image.chromaShiftW == 1 && image.chromaShiftH == 0) {
 
 							yuv422_2_rgb8888(w.ptr(), image.planes[0], image.planes[1], image.planes[2], image.w, image.h, image.linesize[0], image.linesize[1], image.w << 2);
-							// 								libyuv::I422ToARGB(image.planes[0], image.linesize[0], image.planes[2], image.linesize[2], image.planes[1], image.linesize[1], w.ptr(), image.w << 2, image.w, image.h);
+							//libyuv::I422ToARGB(image.planes[0], image.linesize[0], image.planes[2], image.linesize[2], image.planes[1], image.linesize[1], w.ptr(), image.w << 2, image.w, image.h);
 							converted = true;
 						} else if (image.chromaShiftW == 0 && image.chromaShiftH == 0) {
 
 							yuv444_2_rgb8888(w.ptr(), image.planes[0], image.planes[1], image.planes[2], image.w, image.h, image.linesize[0], image.linesize[1], image.w << 2);
-							// 								libyuv::I444ToARGB(image.planes[0], image.linesize[0], image.planes[2], image.linesize[2], image.planes[1], image.linesize[1], w.ptr(), image.w << 2, image.w, image.h);
+							//libyuv::I444ToARGB(image.planes[0], image.linesize[0], image.planes[2], image.linesize[2], image.planes[1], image.linesize[1], w.ptr(), image.w << 2, image.w, image.h);
 							converted = true;
 						} else if (image.chromaShiftW == 2 && image.chromaShiftH == 0) {
 
-							// 								libyuv::I411ToARGB(image.planes[0], image.linesize[0], image.planes[2], image.linesize[2], image.planes[1], image.linesize[1], w.ptr(), image.w << 2, image.w, image.h);
-							// 								converted = true;
+							//libyuv::I411ToARGB(image.planes[0], image.linesize[0], image.planes[2], image.linesize[2] image.planes[1], image.linesize[1], w.ptr(), image.w << 2, image.w, image.h);
+							//converted = true;
 						}
 
 						if (converted) {
@@ -484,6 +485,8 @@ RES ResourceFormatLoaderWebm::load(const String &p_path, const String &p_origina
 		*r_error = OK;
 	}
 
+	f->close();
+	memdelete(f);
 	return webm_stream;
 }
 
