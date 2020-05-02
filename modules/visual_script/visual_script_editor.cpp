@@ -30,7 +30,7 @@
 
 #include "visual_script_editor.h"
 
-#include "core/input/input_filter.h"
+#include "core/input/input.h"
 #include "core/object.h"
 #include "core/os/keyboard.h"
 #include "core/script_language.h"
@@ -350,8 +350,11 @@ static Color _color_from_type(Variant::Type p_type, bool dark_theme = true) {
 			case Variant::STRING: color = Color(0.42, 0.65, 0.93); break;
 
 			case Variant::VECTOR2: color = Color(0.74, 0.57, 0.95); break;
+			case Variant::VECTOR2I: color = Color(0.74, 0.57, 0.95); break;
 			case Variant::RECT2: color = Color(0.95, 0.57, 0.65); break;
+			case Variant::RECT2I: color = Color(0.95, 0.57, 0.65); break;
 			case Variant::VECTOR3: color = Color(0.84, 0.49, 0.93); break;
+			case Variant::VECTOR3I: color = Color(0.84, 0.49, 0.93); break;
 			case Variant::TRANSFORM2D: color = Color(0.77, 0.93, 0.41); break;
 			case Variant::PLANE: color = Color(0.97, 0.44, 0.44); break;
 			case Variant::QUAT: color = Color(0.93, 0.41, 0.64); break;
@@ -389,8 +392,11 @@ static Color _color_from_type(Variant::Type p_type, bool dark_theme = true) {
 			case Variant::STRING: color = Color(0.27, 0.56, 0.91); break;
 
 			case Variant::VECTOR2: color = Color(0.68, 0.46, 0.93); break;
+			case Variant::VECTOR2I: color = Color(0.68, 0.46, 0.93); break;
 			case Variant::RECT2: color = Color(0.93, 0.46, 0.56); break;
+			case Variant::RECT2I: color = Color(0.93, 0.46, 0.56); break;
 			case Variant::VECTOR3: color = Color(0.86, 0.42, 0.93); break;
+			case Variant::VECTOR3I: color = Color(0.86, 0.42, 0.93); break;
 			case Variant::TRANSFORM2D: color = Color(0.59, 0.81, 0.1); break;
 			case Variant::PLANE: color = Color(0.97, 0.44, 0.44); break;
 			case Variant::QUAT: color = Color(0.93, 0.41, 0.64); break;
@@ -510,8 +516,11 @@ void VisualScriptEditor::_update_graph(int p_only_id) {
 		Control::get_theme_icon("float", "EditorIcons"),
 		Control::get_theme_icon("String", "EditorIcons"),
 		Control::get_theme_icon("Vector2", "EditorIcons"),
+		Control::get_theme_icon("Vector2i", "EditorIcons"),
 		Control::get_theme_icon("Rect2", "EditorIcons"),
+		Control::get_theme_icon("Rect2i", "EditorIcons"),
 		Control::get_theme_icon("Vector3", "EditorIcons"),
+		Control::get_theme_icon("Vector3i", "EditorIcons"),
 		Control::get_theme_icon("Transform2D", "EditorIcons"),
 		Control::get_theme_icon("Plane", "EditorIcons"),
 		Control::get_theme_icon("Quat", "EditorIcons"),
@@ -522,6 +531,8 @@ void VisualScriptEditor::_update_graph(int p_only_id) {
 		Control::get_theme_icon("NodePath", "EditorIcons"),
 		Control::get_theme_icon("RID", "EditorIcons"),
 		Control::get_theme_icon("MiniObject", "EditorIcons"),
+		Control::get_theme_icon("Callable", "EditorIcons"),
+		Control::get_theme_icon("Signal", "EditorIcons"),
 		Control::get_theme_icon("Dictionary", "EditorIcons"),
 		Control::get_theme_icon("Array", "EditorIcons"),
 		Control::get_theme_icon("PackedByteArray", "EditorIcons"),
@@ -974,8 +985,11 @@ void VisualScriptEditor::_update_members() {
 		Control::get_theme_icon("float", "EditorIcons"),
 		Control::get_theme_icon("String", "EditorIcons"),
 		Control::get_theme_icon("Vector2", "EditorIcons"),
+		Control::get_theme_icon("Vector2i", "EditorIcons"),
 		Control::get_theme_icon("Rect2", "EditorIcons"),
+		Control::get_theme_icon("Rect2i", "EditorIcons"),
 		Control::get_theme_icon("Vector3", "EditorIcons"),
+		Control::get_theme_icon("Vector3i", "EditorIcons"),
 		Control::get_theme_icon("Transform2D", "EditorIcons"),
 		Control::get_theme_icon("Plane", "EditorIcons"),
 		Control::get_theme_icon("Quat", "EditorIcons"),
@@ -986,6 +1000,8 @@ void VisualScriptEditor::_update_members() {
 		Control::get_theme_icon("NodePath", "EditorIcons"),
 		Control::get_theme_icon("RID", "EditorIcons"),
 		Control::get_theme_icon("MiniObject", "EditorIcons"),
+		Control::get_theme_icon("Callable", "EditorIcons"),
+		Control::get_theme_icon("Signal", "EditorIcons"),
 		Control::get_theme_icon("Dictionary", "EditorIcons"),
 		Control::get_theme_icon("Array", "EditorIcons"),
 		Control::get_theme_icon("PackedByteArray", "EditorIcons"),
@@ -1057,9 +1073,9 @@ void VisualScriptEditor::_member_selected() {
 	if (ti->get_parent() == members->get_root()->get_children()) {
 
 #ifdef OSX_ENABLED
-		bool held_ctrl = InputFilter::get_singleton()->is_key_pressed(KEY_META);
+		bool held_ctrl = Input::get_singleton()->is_key_pressed(KEY_META);
 #else
-		bool held_ctrl = InputFilter::get_singleton()->is_key_pressed(KEY_CONTROL);
+		bool held_ctrl = Input::get_singleton()->is_key_pressed(KEY_CONTROL);
 #endif
 		if (held_ctrl) {
 			ERR_FAIL_COND(!script->has_function(selected));
@@ -1155,6 +1171,8 @@ void VisualScriptEditor::_member_edited() {
 		undo_redo->add_undo_method(script.ptr(), "rename_variable", new_name, name);
 		undo_redo->add_do_method(this, "_update_members");
 		undo_redo->add_undo_method(this, "_update_members");
+		undo_redo->add_do_method(this, "_update_graph");
+		undo_redo->add_undo_method(this, "_update_graph");
 		undo_redo->add_do_method(this, "emit_signal", "edited_script_changed");
 		undo_redo->add_undo_method(this, "emit_signal", "edited_script_changed");
 		undo_redo->commit_action();
@@ -1360,7 +1378,7 @@ void VisualScriptEditor::_member_button(Object *p_item, int p_column, int p_butt
 		}
 	} else if (ti->get_parent() == root->get_children()) {
 		selected = ti->get_text(0);
-		function_name_edit->set_position(InputFilter::get_singleton()->get_mouse_position() - Vector2(60, -10));
+		function_name_edit->set_position(Input::get_singleton()->get_mouse_position() - Vector2(60, -10));
 		function_name_edit->popup();
 		function_name_box->set_text(selected);
 		function_name_box->select_all();
@@ -1722,7 +1740,7 @@ void VisualScriptEditor::_input(const Ref<InputEvent> &p_event) {
 	Ref<InputEventMouseButton> key = p_event;
 
 	if (key.is_valid() && !key->is_pressed()) {
-		mouse_up_position = InputFilter::get_singleton()->get_mouse_position();
+		mouse_up_position = Input::get_singleton()->get_mouse_position();
 	}
 }
 
@@ -1732,7 +1750,7 @@ void VisualScriptEditor::_graph_gui_input(const Ref<InputEvent> &p_event) {
 	if (key.is_valid() && key->is_pressed() && key->get_button_mask() == BUTTON_RIGHT) {
 		saved_position = graph->get_local_mouse_position();
 
-		Point2 gpos = InputFilter::get_singleton()->get_mouse_position();
+		Point2 gpos = Input::get_singleton()->get_mouse_position();
 		_generic_search(script->get_instance_base_type(), gpos);
 	}
 }
@@ -1986,9 +2004,9 @@ void VisualScriptEditor::drop_data_fw(const Point2 &p_point, const Variant &p_da
 	if (String(d["type"]) == "visual_script_variable_drag") {
 
 #ifdef OSX_ENABLED
-		bool use_set = InputFilter::get_singleton()->is_key_pressed(KEY_META);
+		bool use_set = Input::get_singleton()->is_key_pressed(KEY_META);
 #else
-		bool use_set = InputFilter::get_singleton()->is_key_pressed(KEY_CONTROL);
+		bool use_set = Input::get_singleton()->is_key_pressed(KEY_CONTROL);
 #endif
 		Vector2 ofs = graph->get_scroll_ofs() + p_point;
 		if (graph->is_using_snap()) {
@@ -2181,9 +2199,9 @@ void VisualScriptEditor::drop_data_fw(const Point2 &p_point, const Variant &p_da
 		}
 
 #ifdef OSX_ENABLED
-		bool use_node = InputFilter::get_singleton()->is_key_pressed(KEY_META);
+		bool use_node = Input::get_singleton()->is_key_pressed(KEY_META);
 #else
-		bool use_node = InputFilter::get_singleton()->is_key_pressed(KEY_CONTROL);
+		bool use_node = Input::get_singleton()->is_key_pressed(KEY_CONTROL);
 #endif
 
 		Array nodes = d["nodes"];
@@ -2245,7 +2263,7 @@ void VisualScriptEditor::drop_data_fw(const Point2 &p_point, const Variant &p_da
 
 		Node *sn = _find_script_node(get_tree()->get_edited_scene_root(), get_tree()->get_edited_scene_root(), script);
 
-		if (!sn && !InputFilter::get_singleton()->is_key_pressed(KEY_SHIFT)) {
+		if (!sn && !Input::get_singleton()->is_key_pressed(KEY_SHIFT)) {
 			EditorNode::get_singleton()->show_warning(vformat(TTR("Can't drop properties because script '%s' is not used in this scene.\nDrop holding 'Shift' to just copy the signature."), get_name()));
 			return;
 		}
@@ -2265,12 +2283,12 @@ void VisualScriptEditor::drop_data_fw(const Point2 &p_point, const Variant &p_da
 
 		ofs /= EDSCALE;
 #ifdef OSX_ENABLED
-		bool use_get = InputFilter::get_singleton()->is_key_pressed(KEY_META);
+		bool use_get = Input::get_singleton()->is_key_pressed(KEY_META);
 #else
-		bool use_get = InputFilter::get_singleton()->is_key_pressed(KEY_CONTROL);
+		bool use_get = Input::get_singleton()->is_key_pressed(KEY_CONTROL);
 #endif
 
-		if (!node || InputFilter::get_singleton()->is_key_pressed(KEY_SHIFT)) {
+		if (!node || Input::get_singleton()->is_key_pressed(KEY_SHIFT)) {
 
 			if (use_get)
 				undo_redo->create_action(TTR("Add Getter Property"));
@@ -3917,7 +3935,9 @@ void VisualScriptEditor::_notification(int p_what) {
 	switch (p_what) {
 		case NOTIFICATION_READY: {
 			variable_editor->connect("changed", callable_mp(this, &VisualScriptEditor::_update_members));
+			variable_editor->connect("changed", callable_mp(this, &VisualScriptEditor::_update_graph), varray(-1), CONNECT_DEFERRED);
 			signal_editor->connect("changed", callable_mp(this, &VisualScriptEditor::_update_members));
+			signal_editor->connect("changed", callable_mp(this, &VisualScriptEditor::_update_graph), varray(-1), CONNECT_DEFERRED);
 			[[fallthrough]];
 		}
 		case NOTIFICATION_THEME_CHANGED: {
@@ -4629,6 +4649,7 @@ void VisualScriptEditor::_bind_methods() {
 	ClassDB::bind_method("_input", &VisualScriptEditor::_input);
 
 	ClassDB::bind_method("_update_graph_connections", &VisualScriptEditor::_update_graph_connections);
+	ClassDB::bind_method("_update_members", &VisualScriptEditor::_update_members);
 
 	ClassDB::bind_method("_generic_search", &VisualScriptEditor::_generic_search);
 }

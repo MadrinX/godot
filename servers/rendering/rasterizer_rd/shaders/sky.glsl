@@ -58,6 +58,11 @@ params;
 
 layout(set = 0, binding = 0) uniform sampler material_samplers[12];
 
+layout(set = 0, binding = 1, std430) restrict readonly buffer GlobalVariableData {
+	vec4 data[];
+}
+global_variables;
+
 #ifdef USE_MATERIAL_UNIFORMS
 layout(set = 1, binding = 0, std140) uniform MaterialUniforms{
 	/* clang-format off */
@@ -96,9 +101,8 @@ layout(set = 2, binding = 2) uniform texture2D quarter_res;
 #endif
 
 struct DirectionalLightData {
-	vec3 direction;
-	float energy;
-	vec3 color;
+	vec4 direction_energy;
+	vec4 color_size;
 	bool enabled;
 };
 
@@ -178,4 +182,10 @@ FRAGMENT_SHADER_CODE
 
 	frag_color.rgb = color * params.position_multiplier.w;
 	frag_color.a = alpha;
+
+	// Blending is disabled for Sky, so alpha doesn't blend
+	// alpha is used for subsurface scattering so make sure it doesn't get applied to Sky
+	if (!AT_CUBEMAP_PASS && !AT_HALF_RES_PASS && !AT_QUARTER_RES_PASS) {
+		frag_color.a = 0.0;
+	}
 }

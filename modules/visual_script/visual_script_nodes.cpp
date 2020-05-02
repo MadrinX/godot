@@ -32,7 +32,7 @@
 
 #include "core/engine.h"
 #include "core/global_constants.h"
-#include "core/input/input_filter.h"
+#include "core/input/input.h"
 #include "core/os/os.h"
 #include "core/project_settings.h"
 #include "scene/main/node.h"
@@ -3870,16 +3870,16 @@ public:
 
 		switch (mode) {
 			case VisualScriptInputAction::MODE_PRESSED: {
-				*p_outputs[0] = InputFilter::get_singleton()->is_action_pressed(action);
+				*p_outputs[0] = Input::get_singleton()->is_action_pressed(action);
 			} break;
 			case VisualScriptInputAction::MODE_RELEASED: {
-				*p_outputs[0] = !InputFilter::get_singleton()->is_action_pressed(action);
+				*p_outputs[0] = !Input::get_singleton()->is_action_pressed(action);
 			} break;
 			case VisualScriptInputAction::MODE_JUST_PRESSED: {
-				*p_outputs[0] = InputFilter::get_singleton()->is_action_just_pressed(action);
+				*p_outputs[0] = Input::get_singleton()->is_action_just_pressed(action);
 			} break;
 			case VisualScriptInputAction::MODE_JUST_RELEASED: {
-				*p_outputs[0] = InputFilter::get_singleton()->is_action_just_released(action);
+				*p_outputs[0] = Input::get_singleton()->is_action_just_released(action);
 			} break;
 		}
 
@@ -4184,9 +4184,12 @@ void register_visual_script_nodes() {
 	VisualScriptLanguage::singleton->add_register_func("operators/logic/select", create_node_generic<VisualScriptSelect>);
 
 	VisualScriptLanguage::singleton->add_register_func("functions/deconstruct/" + Variant::get_type_name(Variant::Type::VECTOR2), create_node_deconst_typed<Variant::Type::VECTOR2>);
+	VisualScriptLanguage::singleton->add_register_func("functions/deconstruct/" + Variant::get_type_name(Variant::Type::VECTOR2I), create_node_deconst_typed<Variant::Type::VECTOR2I>);
 	VisualScriptLanguage::singleton->add_register_func("functions/deconstruct/" + Variant::get_type_name(Variant::Type::VECTOR3), create_node_deconst_typed<Variant::Type::VECTOR3>);
+	VisualScriptLanguage::singleton->add_register_func("functions/deconstruct/" + Variant::get_type_name(Variant::Type::VECTOR3I), create_node_deconst_typed<Variant::Type::VECTOR3I>);
 	VisualScriptLanguage::singleton->add_register_func("functions/deconstruct/" + Variant::get_type_name(Variant::Type::COLOR), create_node_deconst_typed<Variant::Type::COLOR>);
 	VisualScriptLanguage::singleton->add_register_func("functions/deconstruct/" + Variant::get_type_name(Variant::Type::RECT2), create_node_deconst_typed<Variant::Type::RECT2>);
+	VisualScriptLanguage::singleton->add_register_func("functions/deconstruct/" + Variant::get_type_name(Variant::Type::RECT2I), create_node_deconst_typed<Variant::Type::RECT2I>);
 	VisualScriptLanguage::singleton->add_register_func("functions/deconstruct/" + Variant::get_type_name(Variant::Type::TRANSFORM2D), create_node_deconst_typed<Variant::Type::TRANSFORM2D>);
 	VisualScriptLanguage::singleton->add_register_func("functions/deconstruct/" + Variant::get_type_name(Variant::Type::PLANE), create_node_deconst_typed<Variant::Type::PLANE>);
 	VisualScriptLanguage::singleton->add_register_func("functions/deconstruct/" + Variant::get_type_name(Variant::Type::QUAT), create_node_deconst_typed<Variant::Type::QUAT>);

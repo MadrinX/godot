@@ -70,7 +70,7 @@ void Light3D::set_shadow(bool p_enable) {
 	shadow = p_enable;
 	RS::get_singleton()->light_set_shadow(light, p_enable);
 
-	if (type == RenderingServer::LIGHT_SPOT) {
+	if (type == RenderingServer::LIGHT_SPOT || type == RenderingServer::LIGHT_OMNI) {
 		update_configuration_warning();
 	}
 }
@@ -166,6 +166,18 @@ Light3D::BakeMode Light3D::get_bake_mode() const {
 	return bake_mode;
 }
 
+void Light3D::set_projector(const Ref<Texture2D> &p_texture) {
+
+	projector = p_texture;
+	RID tex_id = projector.is_valid() ? projector->get_rid() : RID();
+	RS::get_singleton()->light_set_projector(light, tex_id);
+	update_configuration_warning();
+}
+
+Ref<Texture2D> Light3D::get_projector() const {
+	return projector;
+}
+
 void Light3D::_update_visibility() {
 
 	if (!is_inside_tree())
@@ -216,6 +228,18 @@ bool Light3D::is_editor_only() const {
 }
 
 void Light3D::_validate_property(PropertyInfo &property) const {
+
+	if (get_light_type() == RS::LIGHT_DIRECTIONAL && property.name == "light_size") {
+		property.usage = 0;
+	}
+
+	if (get_light_type() == RS::LIGHT_DIRECTIONAL && property.name == "light_projector") {
+		property.usage = 0;
+	}
+
+	if (get_light_type() != RS::LIGHT_DIRECTIONAL && property.name == "light_angular_distance") {
+		property.usage = 0;
+	}
 }
 
 void Light3D::_bind_methods() {
@@ -247,10 +271,16 @@ void Light3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_bake_mode", "bake_mode"), &Light3D::set_bake_mode);
 	ClassDB::bind_method(D_METHOD("get_bake_mode"), &Light3D::get_bake_mode);
 
+	ClassDB::bind_method(D_METHOD("set_projector", "projector"), &Light3D::set_projector);
+	ClassDB::bind_method(D_METHOD("get_projector"), &Light3D::get_projector);
+
 	ADD_GROUP("Light", "light_");
 	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "light_color", PROPERTY_HINT_COLOR_NO_ALPHA), "set_color", "get_color");
 	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "light_energy", PROPERTY_HINT_RANGE, "0,16,0.01,or_greater"), "set_param", "get_param", PARAM_ENERGY);
 	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "light_indirect_energy", PROPERTY_HINT_RANGE, "0,16,0.01,or_greater"), "set_param", "get_param", PARAM_INDIRECT_ENERGY);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "light_projector", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "set_projector", "get_projector");
+	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "light_size", PROPERTY_HINT_RANGE, "0,64,0.01,or_greater"), "set_param", "get_param", PARAM_SIZE);
+	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "light_angular_distance", PROPERTY_HINT_RANGE, "0,90,0.01"), "set_param", "get_param", PARAM_SIZE);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "light_negative"), "set_negative", "is_negative");
 	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "light_specular", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_param", "get_param", PARAM_SPECULAR);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "light_bake_mode", PROPERTY_HINT_ENUM, "Disable,Indirect,All"), "set_bake_mode", "get_bake_mode");
@@ -262,6 +292,7 @@ void Light3D::_bind_methods() {
 	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "shadow_normal_bias", PROPERTY_HINT_RANGE, "0,10,0.001"), "set_param", "get_param", PARAM_SHADOW_NORMAL_BIAS);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "shadow_reverse_cull_face"), "set_shadow_reverse_cull_face", "get_shadow_reverse_cull_face");
 	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "shadow_transmittance_bias", PROPERTY_HINT_RANGE, "-16,16,0.01"), "set_param", "get_param", PARAM_TRANSMITTANCE_BIAS);
+	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "shadow_blur", PROPERTY_HINT_RANGE, "0.1,8,0.01"), "set_param", "get_param", PARAM_SHADOW_BLUR);
 	ADD_GROUP("Editor", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "editor_only"), "set_editor_only", "is_editor_only");
 	ADD_GROUP("", "");
@@ -270,6 +301,7 @@ void Light3D::_bind_methods() {
 	BIND_ENUM_CONSTANT(PARAM_INDIRECT_ENERGY);
 	BIND_ENUM_CONSTANT(PARAM_SPECULAR);
 	BIND_ENUM_CONSTANT(PARAM_RANGE);
+	BIND_ENUM_CONSTANT(PARAM_SIZE);
 	BIND_ENUM_CONSTANT(PARAM_ATTENUATION);
 	BIND_ENUM_CONSTANT(PARAM_SPOT_ANGLE);
 	BIND_ENUM_CONSTANT(PARAM_SPOT_ATTENUATION);
@@ -281,6 +313,7 @@ void Light3D::_bind_methods() {
 	BIND_ENUM_CONSTANT(PARAM_SHADOW_NORMAL_BIAS);
 	BIND_ENUM_CONSTANT(PARAM_SHADOW_BIAS);
 	BIND_ENUM_CONSTANT(PARAM_SHADOW_PANCAKE_SIZE);
+	BIND_ENUM_CONSTANT(PARAM_SHADOW_BLUR);
 	BIND_ENUM_CONSTANT(PARAM_TRANSMITTANCE_BIAS);
 	BIND_ENUM_CONSTANT(PARAM_MAX);
 
@@ -315,6 +348,7 @@ Light3D::Light3D(RenderingServer::LightType p_type) {
 	set_param(PARAM_INDIRECT_ENERGY, 1);
 	set_param(PARAM_SPECULAR, 0.5);
 	set_param(PARAM_RANGE, 5);
+	set_param(PARAM_SIZE, 0);
 	set_param(PARAM_ATTENUATION, 1);
 	set_param(PARAM_SPOT_ANGLE, 45);
 	set_param(PARAM_SPOT_ATTENUATION, 1);
@@ -324,6 +358,7 @@ Light3D::Light3D(RenderingServer::LightType p_type) {
 	set_param(PARAM_SHADOW_SPLIT_3_OFFSET, 0.5);
 	set_param(PARAM_SHADOW_FADE_START, 0.8);
 	set_param(PARAM_SHADOW_PANCAKE_SIZE, 20.0);
+	set_param(PARAM_SHADOW_BLUR, 1.0);
 	set_param(PARAM_SHADOW_BIAS, 0.02);
 	set_param(PARAM_SHADOW_NORMAL_BIAS, 1.0);
 	set_param(PARAM_TRANSMITTANCE_BIAS, 0.05);
@@ -430,6 +465,19 @@ OmniLight3D::ShadowMode OmniLight3D::get_shadow_mode() const {
 	return shadow_mode;
 }
 
+String OmniLight3D::get_configuration_warning() const {
+	String warning = Light3D::get_configuration_warning();
+
+	if (!has_shadow() && get_projector().is_valid()) {
+		if (warning != String()) {
+			warning += "\n\n";
+		}
+		warning += TTR("Projector texture only works with shadows active.");
+	}
+
+	return warning;
+}
+
 void OmniLight3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_shadow_mode", "mode"), &OmniLight3D::set_shadow_mode);
@@ -459,6 +507,13 @@ String SpotLight3D::get_configuration_warning() const {
 		}
 
 		warning += TTR("A SpotLight3D with an angle wider than 90 degrees cannot cast shadows.");
+	}
+
+	if (!has_shadow() && get_projector().is_valid()) {
+		if (warning != String()) {
+			warning += "\n\n";
+		}
+		warning += TTR("Projector texture only works with shadows active.");
 	}
 
 	return warning;

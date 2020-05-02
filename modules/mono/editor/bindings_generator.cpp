@@ -566,8 +566,12 @@ String BindingsGenerator::bbcode_to_xml(const String &p_bbcode, const TypeInterf
 			code_tag = true;
 			pos = brk_end + 1;
 			tag_stack.push_front(tag);
+		} else if (tag == "kbd") {
+			// keyboard combinations are not supported in xml comments
+			pos = brk_end + 1;
+			tag_stack.push_front(tag);
 		} else if (tag == "center") {
-			// center is alignment not supported in xml comments
+			// center alignment is not supported in xml comments
 			pos = brk_end + 1;
 			tag_stack.push_front(tag);
 		} else if (tag == "br") {
@@ -2383,7 +2387,7 @@ bool BindingsGenerator::_populate_object_type_interfaces() {
 		for (const List<PropertyInfo>::Element *E = property_list.front(); E; E = E->next()) {
 			const PropertyInfo &property = E->get();
 
-			if (property.usage & PROPERTY_USAGE_GROUP || property.usage & PROPERTY_USAGE_CATEGORY)
+			if (property.usage & PROPERTY_USAGE_GROUP || property.usage & PROPERTY_USAGE_SUBGROUP || property.usage & PROPERTY_USAGE_CATEGORY)
 				continue;
 
 			PropertyInterface iprop;

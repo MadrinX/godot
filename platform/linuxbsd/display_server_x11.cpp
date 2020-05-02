@@ -208,7 +208,7 @@ void DisplayServerX11::_update_real_mouse_position(const WindowData &wd) {
 			last_mouse_pos.x = win_x;
 			last_mouse_pos.y = win_y;
 			last_mouse_pos_valid = true;
-			InputFilter::get_singleton()->set_mouse_position(last_mouse_pos);
+			Input::get_singleton()->set_mouse_position(last_mouse_pos);
 		}
 	}
 }
@@ -254,10 +254,10 @@ bool DisplayServerX11::_refresh_device_info() {
 		bool absolute_mode = false;
 		int resolution_x = 0;
 		int resolution_y = 0;
-		int range_min_x = 0;
-		int range_min_y = 0;
-		int range_max_x = 0;
-		int range_max_y = 0;
+		double range_min_x = 0;
+		double range_min_y = 0;
+		double range_max_x = 0;
+		double range_max_y = 0;
 		int pressure_resolution = 0;
 		int tilt_resolution_x = 0;
 		int tilt_resolution_y = 0;
@@ -392,7 +392,7 @@ void DisplayServerX11::mouse_set_mode(MouseMode p_mode) {
 			XWarpPointer(x11_display, None, main_window.x11_window,
 					0, 0, 0, 0, (int)center.x, (int)center.y);
 
-			InputFilter::get_singleton()->set_mouse_position(center);
+			Input::get_singleton()->set_mouse_position(center);
 		}
 	} else {
 		do_mouse_warp = false;
@@ -1471,8 +1471,11 @@ DisplayServer::WindowMode DisplayServerX11::window_get_mode(WindowID p_window) c
 
 		if (result == Success && data) {
 			long *state = (long *)data;
-			if (state[0] == WM_IconicState)
+			if (state[0] == WM_IconicState) {
+				XFree(data);
 				return WINDOW_MODE_MINIMIZED;
+			}
+			XFree(data);
 		}
 	}
 
@@ -2074,7 +2077,7 @@ void DisplayServerX11::_handle_key_event(WindowID p_window, XKeyEvent *p_event, 
 					k->set_shift(true);
 				}
 
-				InputFilter::get_singleton()->accumulate_input_event(k);
+				Input::get_singleton()->accumulate_input_event(k);
 			}
 			memfree(utf8string);
 			return;
@@ -2217,14 +2220,14 @@ void DisplayServerX11::_handle_key_event(WindowID p_window, XKeyEvent *p_event, 
 			k->set_metakey(false);
 	}
 
-	bool last_is_pressed = InputFilter::get_singleton()->is_key_pressed(k->get_keycode());
+	bool last_is_pressed = Input::get_singleton()->is_key_pressed(k->get_keycode());
 	if (k->is_pressed()) {
 		if (last_is_pressed) {
 			k->set_echo(true);
 		}
 	}
 
-	InputFilter::get_singleton()->accumulate_input_event(k);
+	Input::get_singleton()->accumulate_input_event(k);
 }
 
 void DisplayServerX11::_xim_destroy_callback(::XIM im, ::XPointer client_data,
@@ -2483,12 +2486,12 @@ void DisplayServerX11::process_events() {
 								// in a spurious mouse motion event being sent to Godot; remember it to be able to filter it out
 								xi.mouse_pos_to_filter = pos;
 							}
-							InputFilter::get_singleton()->accumulate_input_event(st);
+							Input::get_singleton()->accumulate_input_event(st);
 						} else {
 							if (!xi.state.has(index)) // Defensive
 								break;
 							xi.state.erase(index);
-							InputFilter::get_singleton()->accumulate_input_event(st);
+							Input::get_singleton()->accumulate_input_event(st);
 						}
 					} break;
 
@@ -2507,7 +2510,7 @@ void DisplayServerX11::process_events() {
 							sd->set_index(index);
 							sd->set_position(pos);
 							sd->set_relative(pos - curr_pos_elem->value());
-							InputFilter::get_singleton()->accumulate_input_event(sd);
+							Input::get_singleton()->accumulate_input_event(sd);
 
 							curr_pos_elem->value() = pos;
 						}
@@ -2577,7 +2580,7 @@ void DisplayServerX11::process_events() {
 
 			case FocusOut:
 				window_has_focus = false;
-				InputFilter::get_singleton()->release_pressed_events();
+				Input::get_singleton()->release_pressed_events();
 				_send_window_event(windows[window_id], WINDOW_EVENT_FOCUS_OUT);
 				window_focused = false;
 
@@ -2606,7 +2609,7 @@ void DisplayServerX11::process_events() {
 					st->set_index(E->key());
 					st->set_window_id(window_id);
 					st->set_position(E->get());
-					InputFilter::get_singleton()->accumulate_input_event(st);
+					Input::get_singleton()->accumulate_input_event(st);
 				}
 				xi.state.clear();
 #endif
@@ -2668,7 +2671,7 @@ void DisplayServerX11::process_events() {
 					}
 				}
 
-				InputFilter::get_singleton()->accumulate_input_event(mb);
+				Input::get_singleton()->accumulate_input_event(mb);
 
 			} break;
 			case MotionNotify: {
@@ -2770,8 +2773,8 @@ void DisplayServerX11::process_events() {
 				mm->set_button_mask(mouse_get_button_state());
 				mm->set_position(posi);
 				mm->set_global_position(posi);
-				InputFilter::get_singleton()->set_mouse_position(posi);
-				mm->set_speed(InputFilter::get_singleton()->get_last_mouse_speed());
+				Input::get_singleton()->set_mouse_position(posi);
+				mm->set_speed(Input::get_singleton()->get_last_mouse_speed());
 
 				mm->set_relative(rel);
 
@@ -2782,7 +2785,7 @@ void DisplayServerX11::process_events() {
 				// this is so that the relative motion doesn't get messed up
 				// after we regain focus.
 				if (window_has_focus || !mouse_mode_grab)
-					InputFilter::get_singleton()->accumulate_input_event(mm);
+					Input::get_singleton()->accumulate_input_event(mm);
 
 			} break;
 			case KeyPress:
@@ -2975,7 +2978,7 @@ void DisplayServerX11::process_events() {
 		*/
 	}
 
-	InputFilter::get_singleton()->flush_accumulated_events();
+	Input::get_singleton()->flush_accumulated_events();
 }
 
 void DisplayServerX11::release_rendering_thread() {
@@ -3370,7 +3373,7 @@ DisplayServerX11::WindowID DisplayServerX11::_create_window(WindowMode p_mode, u
 
 DisplayServerX11::DisplayServerX11(const String &p_rendering_driver, WindowMode p_mode, uint32_t p_flags, const Vector2i &p_resolution, Error &r_error) {
 
-	InputFilter::get_singleton()->set_event_dispatch_function(_dispatch_input_events);
+	Input::get_singleton()->set_event_dispatch_function(_dispatch_input_events);
 
 	r_error = OK;
 
@@ -3603,8 +3606,10 @@ DisplayServerX11::DisplayServerX11(const String &p_rendering_driver, WindowMode 
 		}
 	}
 #endif
-
-	WindowID main_window = _create_window(p_mode, p_flags, Rect2i(Point2(), p_resolution));
+	Point2i window_position(
+			(screen_get_size(0).width - p_resolution.width) / 2,
+			(screen_get_size(0).height - p_resolution.height) / 2);
+	WindowID main_window = _create_window(p_mode, p_flags, Rect2i(window_position, p_resolution));
 	for (int i = 0; i < WINDOW_FLAG_MAX; i++) {
 		if (p_flags & (1 << i)) {
 			window_set_flag(WindowFlags(i), true, main_window);

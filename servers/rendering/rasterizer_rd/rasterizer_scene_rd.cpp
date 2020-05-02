@@ -36,6 +36,18 @@
 
 uint64_t RasterizerSceneRD::auto_exposure_counter = 2;
 
+void get_vogel_disk(float *r_kernel, int p_sample_count) {
+	const float golden_angle = 2.4;
+
+	for (int i = 0; i < p_sample_count; i++) {
+		float r = Math::sqrt(float(i) + 0.5) / Math::sqrt(float(p_sample_count));
+		float theta = float(i) * golden_angle;
+
+		r_kernel[i * 4] = Math::cos(theta) * r;
+		r_kernel[i * 4 + 1] = Math::sin(theta) * r;
+	}
+}
+
 void RasterizerSceneRD::_clear_reflection_data(ReflectionData &rd) {
 
 	rd.layers.clear();
@@ -181,10 +193,9 @@ void RasterizerSceneRD::_update_reflection_mipmaps(ReflectionData &rd) {
 			for (int j = 0; j < rd.layers[i].mipmaps.size() - 1; j++) {
 				for (int k = 0; k < 6; k++) {
 					RID view = rd.layers[i].mipmaps[j].views[k];
-					RID fb = rd.layers[i].mipmaps[j + 1].framebuffers[k];
-					Vector2 size = rd.layers[i].mipmaps[j].size;
-					size = Vector2(1.0 / size.x, 1.0 / size.y);
-					storage->get_effects()->make_mipmap(view, fb, size);
+					RID texture = rd.layers[i].mipmaps[j + 1].views[k];
+					Size2i size = rd.layers[i].mipmaps[j + 1].size;
+					storage->get_effects()->make_mipmap(view, texture, size);
 				}
 			}
 		}
@@ -644,7 +655,8 @@ void RasterizerSceneRD::_setup_sky(RID p_environment, const Vector3 &p_position,
 						sky_scene_state.directional_lights[i].color[0] != sky_scene_state.last_frame_directional_lights[i].color[0] ||
 						sky_scene_state.directional_lights[i].color[1] != sky_scene_state.last_frame_directional_lights[i].color[1] ||
 						sky_scene_state.directional_lights[i].color[2] != sky_scene_state.last_frame_directional_lights[i].color[2] ||
-						sky_scene_state.directional_lights[i].enabled != sky_scene_state.last_frame_directional_lights[i].enabled) {
+						sky_scene_state.directional_lights[i].enabled != sky_scene_state.last_frame_directional_lights[i].enabled ||
+						sky_scene_state.directional_lights[i].size != sky_scene_state.last_frame_directional_lights[i].size) {
 					light_data_dirty = true;
 					break;
 				}
@@ -840,18 +852,22 @@ void RasterizerSceneRD::SkyShaderData::set_code(const String &p_code) {
 	actions.usage_flag_pointers["LIGHT0_ENERGY"] = &uses_light;
 	actions.usage_flag_pointers["LIGHT0_DIRECTION"] = &uses_light;
 	actions.usage_flag_pointers["LIGHT0_COLOR"] = &uses_light;
+	actions.usage_flag_pointers["LIGHT0_SIZE"] = &uses_light;
 	actions.usage_flag_pointers["LIGHT1_ENABLED"] = &uses_light;
 	actions.usage_flag_pointers["LIGHT1_ENERGY"] = &uses_light;
 	actions.usage_flag_pointers["LIGHT1_DIRECTION"] = &uses_light;
 	actions.usage_flag_pointers["LIGHT1_COLOR"] = &uses_light;
+	actions.usage_flag_pointers["LIGHT1_SIZE"] = &uses_light;
 	actions.usage_flag_pointers["LIGHT2_ENABLED"] = &uses_light;
 	actions.usage_flag_pointers["LIGHT2_ENERGY"] = &uses_light;
 	actions.usage_flag_pointers["LIGHT2_DIRECTION"] = &uses_light;
 	actions.usage_flag_pointers["LIGHT2_COLOR"] = &uses_light;
+	actions.usage_flag_pointers["LIGHT2_SIZE"] = &uses_light;
 	actions.usage_flag_pointers["LIGHT3_ENABLED"] = &uses_light;
 	actions.usage_flag_pointers["LIGHT3_ENERGY"] = &uses_light;
 	actions.usage_flag_pointers["LIGHT3_DIRECTION"] = &uses_light;
 	actions.usage_flag_pointers["LIGHT3_COLOR"] = &uses_light;
+	actions.usage_flag_pointers["LIGHT3_SIZE"] = &uses_light;
 
 	actions.uniforms = &uniforms;
 
@@ -915,6 +931,10 @@ void RasterizerSceneRD::SkyShaderData::get_param_list(List<PropertyInfo> *p_para
 
 	for (Map<StringName, ShaderLanguage::ShaderNode::Uniform>::Element *E = uniforms.front(); E; E = E->next()) {
 
+		if (E->get().scope == ShaderLanguage::ShaderNode::Uniform::SCOPE_GLOBAL || E->get().scope == ShaderLanguage::ShaderNode::Uniform::SCOPE_INSTANCE) {
+			continue;
+		}
+
 		if (E->get().texture_order >= 0) {
 			order[E->get().texture_order + 100000] = E->key();
 		} else {
@@ -927,6 +947,23 @@ void RasterizerSceneRD::SkyShaderData::get_param_list(List<PropertyInfo> *p_para
 		PropertyInfo pi = ShaderLanguage::uniform_to_property_info(uniforms[E->get()]);
 		pi.name = E->get();
 		p_param_list->push_back(pi);
+	}
+}
+
+void RasterizerSceneRD::SkyShaderData::get_instance_param_list(List<RasterizerStorage::InstanceShaderParam> *p_param_list) const {
+
+	for (Map<StringName, ShaderLanguage::ShaderNode::Uniform>::Element *E = uniforms.front(); E; E = E->next()) {
+
+		if (E->get().scope != ShaderLanguage::ShaderNode::Uniform::SCOPE_INSTANCE) {
+			continue;
+		}
+
+		RasterizerStorage::InstanceShaderParam p;
+		p.info = ShaderLanguage::uniform_to_property_info(E->get());
+		p.info.name = E->key(); //supply name
+		p.index = E->get().instance_index;
+		p.default_value = ShaderLanguage::constant_value_to_variant(E->get().default_value, E->get().type, E->get().hint);
+		p_param_list->push_back(p);
 	}
 }
 
@@ -1168,12 +1205,12 @@ Color RasterizerSceneRD::environment_get_ambient_light_color(RID p_env) const {
 	ERR_FAIL_COND_V(!env, Color());
 	return env->ambient_light;
 }
-RS::EnvironmentAmbientSource RasterizerSceneRD::environment_get_ambient_light_ambient_source(RID p_env) const {
+RS::EnvironmentAmbientSource RasterizerSceneRD::environment_get_ambient_source(RID p_env) const {
 	Environent *env = environment_owner.getornull(p_env);
 	ERR_FAIL_COND_V(!env, RS::ENV_AMBIENT_SOURCE_BG);
 	return env->ambient_source;
 }
-float RasterizerSceneRD::environment_get_ambient_light_ambient_energy(RID p_env) const {
+float RasterizerSceneRD::environment_get_ambient_light_energy(RID p_env) const {
 	Environent *env = environment_owner.getornull(p_env);
 	ERR_FAIL_COND_V(!env, 0);
 	return env->ambient_light_energy;
@@ -1599,7 +1636,6 @@ void RasterizerSceneRD::shadow_atlas_set_size(RID p_atlas, int p_size) {
 	if (shadow_atlas->depth.is_valid()) {
 		RD::get_singleton()->free(shadow_atlas->depth);
 		shadow_atlas->depth = RID();
-		shadow_atlas->fb = RID();
 	}
 	for (int i = 0; i < 4; i++) {
 		//clear subdivisions
@@ -1625,13 +1661,9 @@ void RasterizerSceneRD::shadow_atlas_set_size(RID p_atlas, int p_size) {
 		tf.format = RD::DATA_FORMAT_R32_SFLOAT;
 		tf.width = shadow_atlas->size;
 		tf.height = shadow_atlas->size;
-		tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT;
+		tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
 
 		shadow_atlas->depth = RD::get_singleton()->texture_create(tf, RD::TextureView());
-
-		Vector<RID> fb;
-		fb.push_back(shadow_atlas->depth);
-		shadow_atlas->fb = RD::get_singleton()->framebuffer_create(fb);
 	}
 }
 
@@ -1901,7 +1933,6 @@ void RasterizerSceneRD::directional_shadow_atlas_set_size(int p_size) {
 	if (directional_shadow.depth.is_valid()) {
 		RD::get_singleton()->free(directional_shadow.depth);
 		directional_shadow.depth = RID();
-		directional_shadow.fb = RID();
 	}
 
 	if (p_size > 0) {
@@ -1910,12 +1941,9 @@ void RasterizerSceneRD::directional_shadow_atlas_set_size(int p_size) {
 		tf.format = RD::DATA_FORMAT_R32_SFLOAT;
 		tf.width = p_size;
 		tf.height = p_size;
-		tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT;
+		tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
 
 		directional_shadow.depth = RD::get_singleton()->texture_create(tf, RD::TextureView());
-		Vector<RID> fb;
-		fb.push_back(directional_shadow.depth);
-		directional_shadow.fb = RD::get_singleton()->framebuffer_create(fb);
 	}
 
 	_base_uniforms_changed();
@@ -2032,7 +2060,7 @@ void RasterizerSceneRD::light_instance_set_transform(RID p_light_instance, const
 	light_instance->transform = p_transform;
 }
 
-void RasterizerSceneRD::light_instance_set_shadow_transform(RID p_light_instance, const CameraMatrix &p_projection, const Transform &p_transform, float p_far, float p_split, int p_pass, float p_shadow_texel_size, float p_bias_scale) {
+void RasterizerSceneRD::light_instance_set_shadow_transform(RID p_light_instance, const CameraMatrix &p_projection, const Transform &p_transform, float p_far, float p_split, int p_pass, float p_shadow_texel_size, float p_bias_scale, float p_range_begin, const Vector2 &p_uv_scale) {
 
 	LightInstance *light_instance = light_instance_owner.getornull(p_light_instance);
 	ERR_FAIL_COND(!light_instance);
@@ -2048,7 +2076,9 @@ void RasterizerSceneRD::light_instance_set_shadow_transform(RID p_light_instance
 	light_instance->shadow_transform[p_pass].farplane = p_far;
 	light_instance->shadow_transform[p_pass].split = p_split;
 	light_instance->shadow_transform[p_pass].bias_scale = p_bias_scale;
+	light_instance->shadow_transform[p_pass].range_begin = p_range_begin;
 	light_instance->shadow_transform[p_pass].shadow_texel_size = p_shadow_texel_size;
+	light_instance->shadow_transform[p_pass].uv_scale = p_uv_scale;
 }
 
 void RasterizerSceneRD::light_instance_mark_visible(RID p_light_instance) {
@@ -2112,6 +2142,21 @@ RasterizerSceneRD::ShadowMap *RasterizerSceneRD::_get_shadow_map(const Size2i &p
 
 	return &shadow_maps[p_size];
 }
+
+//////////////////////////
+
+RID RasterizerSceneRD::decal_instance_create(RID p_decal) {
+	DecalInstance di;
+	di.decal = p_decal;
+	return decal_instance_owner.make_rid(di);
+}
+
+void RasterizerSceneRD::decal_instance_set_transform(RID p_decal, const Transform &p_transform) {
+	DecalInstance *di = decal_instance_owner.getornull(p_decal);
+	ERR_FAIL_COND(!di);
+	di->transform = p_transform;
+}
+
 /////////////////////////////////
 
 RID RasterizerSceneRD::gi_probe_instance_create(RID p_base) {
@@ -3060,7 +3105,7 @@ void RasterizerSceneRD::_allocate_blur_textures(RenderBuffers *rb) {
 	tf.width = rb->width;
 	tf.height = rb->height;
 	tf.type = RD::TEXTURE_TYPE_2D;
-	tf.usage_bits = RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT | RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
 	tf.mipmaps = mipmaps_required;
 
 	rb->blur[0].texture = RD::get_singleton()->texture_create(tf, RD::TextureView());
@@ -3077,11 +3122,6 @@ void RasterizerSceneRD::_allocate_blur_textures(RenderBuffers *rb) {
 
 		RenderBuffers::Blur::Mipmap mm;
 		mm.texture = RD::get_singleton()->texture_create_shared_from_slice(RD::TextureView(), rb->blur[0].texture, 0, i);
-		{
-			Vector<RID> fbs;
-			fbs.push_back(mm.texture);
-			mm.framebuffer = RD::get_singleton()->framebuffer_create(fbs);
-		}
 
 		mm.width = base_width;
 		mm.height = base_height;
@@ -3091,11 +3131,6 @@ void RasterizerSceneRD::_allocate_blur_textures(RenderBuffers *rb) {
 		if (i > 0) {
 
 			mm.texture = RD::get_singleton()->texture_create_shared_from_slice(RD::TextureView(), rb->blur[1].texture, 0, i - 1);
-			{
-				Vector<RID> fbs;
-				fbs.push_back(mm.texture);
-				mm.framebuffer = RD::get_singleton()->framebuffer_create(fbs);
-			}
 
 			rb->blur[1].mipmaps.push_back(mm);
 		}
@@ -3422,9 +3457,9 @@ void RasterizerSceneRD::_render_buffers_post_process_and_tonemap(RID p_render_bu
 				if (env->auto_exposure && rb->luminance.current.is_valid()) {
 					luminance_texture = rb->luminance.current;
 				}
-				storage->get_effects()->gaussian_glow(rb->texture, rb->blur[0].mipmaps[i + 1].framebuffer, rb->blur[0].mipmaps[i + 1].texture, rb->blur[1].mipmaps[i].framebuffer, Vector2(1.0 / vp_w, 1.0 / vp_h), env->glow_strength, true, env->glow_hdr_luminance_cap, env->exposure, env->glow_bloom, env->glow_hdr_bleed_threshold, env->glow_hdr_bleed_scale, luminance_texture, env->auto_exp_scale);
+				storage->get_effects()->gaussian_glow(rb->texture, rb->blur[0].mipmaps[i + 1].texture, rb->blur[1].mipmaps[i].texture, Size2i(vp_w, vp_h), env->glow_strength, true, env->glow_hdr_luminance_cap, env->exposure, env->glow_bloom, env->glow_hdr_bleed_threshold, env->glow_hdr_bleed_scale, luminance_texture, env->auto_exp_scale);
 			} else {
-				storage->get_effects()->gaussian_glow(rb->blur[1].mipmaps[i - 1].texture, rb->blur[0].mipmaps[i + 1].framebuffer, rb->blur[0].mipmaps[i + 1].texture, rb->blur[1].mipmaps[i].framebuffer, Vector2(1.0 / vp_w, 1.0 / vp_h), env->glow_strength);
+				storage->get_effects()->gaussian_glow(rb->blur[1].mipmaps[i - 1].texture, rb->blur[0].mipmaps[i + 1].texture, rb->blur[1].mipmaps[i].texture, Size2i(vp_w, vp_h), env->glow_strength);
 			}
 		}
 	}
@@ -3457,6 +3492,12 @@ void RasterizerSceneRD::_render_buffers_post_process_and_tonemap(RID p_render_bu
 			tonemap.glow_texture = storage->texture_rd_get_default(RasterizerStorageRD::DEFAULT_RD_TEXTURE_BLACK);
 		}
 
+		if (rb->screen_space_aa == RS::VIEWPORT_SCREEN_SPACE_AA_FXAA) {
+			tonemap.use_fxaa = true;
+		}
+
+		tonemap.texture_size = Vector2i(rb->width, rb->height);
+
 		if (env) {
 			tonemap.tonemap_mode = env->tone_mapper;
 			tonemap.white = env->white;
@@ -3480,7 +3521,7 @@ void RasterizerSceneRD::_render_buffers_debug_draw(RID p_render_buffers, RID p_s
 			RID shadow_atlas_texture = shadow_atlas_get_texture(p_shadow_atlas);
 			Size2 rtsize = storage->render_target_get_size(rb->render_target);
 
-			effects->copy_to_rect(shadow_atlas_texture, storage->render_target_get_rd_framebuffer(rb->render_target), Rect2(Vector2(), rtsize / 2), false, true);
+			effects->copy_to_fb_rect(shadow_atlas_texture, storage->render_target_get_rd_framebuffer(rb->render_target), Rect2i(Vector2(), rtsize / 2), false, true);
 		}
 	}
 
@@ -3489,7 +3530,17 @@ void RasterizerSceneRD::_render_buffers_debug_draw(RID p_render_buffers, RID p_s
 			RID shadow_atlas_texture = directional_shadow_get_texture();
 			Size2 rtsize = storage->render_target_get_size(rb->render_target);
 
-			effects->copy_to_rect(shadow_atlas_texture, storage->render_target_get_rd_framebuffer(rb->render_target), Rect2(Vector2(), rtsize / 2), false, true);
+			effects->copy_to_fb_rect(shadow_atlas_texture, storage->render_target_get_rd_framebuffer(rb->render_target), Rect2i(Vector2(), rtsize / 2), false, true);
+		}
+	}
+
+	if (debug_draw == RS::VIEWPORT_DEBUG_DRAW_DECAL_ATLAS) {
+		RID decal_atlas = storage->decal_atlas_get_texture();
+
+		if (decal_atlas.is_valid()) {
+			Size2 rtsize = storage->render_target_get_size(rb->render_target);
+
+			effects->copy_to_fb_rect(decal_atlas, storage->render_target_get_rd_framebuffer(rb->render_target), Rect2i(Vector2(), rtsize / 2), false, false, true);
 		}
 	}
 
@@ -3497,24 +3548,24 @@ void RasterizerSceneRD::_render_buffers_debug_draw(RID p_render_buffers, RID p_s
 		if (rb->luminance.current.is_valid()) {
 			Size2 rtsize = storage->render_target_get_size(rb->render_target);
 
-			effects->copy_to_rect(rb->luminance.current, storage->render_target_get_rd_framebuffer(rb->render_target), Rect2(Vector2(), rtsize / 8), false, true);
+			effects->copy_to_fb_rect(rb->luminance.current, storage->render_target_get_rd_framebuffer(rb->render_target), Rect2(Vector2(), rtsize / 8), false, true);
 		}
 	}
 
 	if (debug_draw == RS::VIEWPORT_DEBUG_DRAW_SSAO && rb->ssao.ao[0].is_valid()) {
 		Size2 rtsize = storage->render_target_get_size(rb->render_target);
 		RID ao_buf = rb->ssao.ao_full.is_valid() ? rb->ssao.ao_full : rb->ssao.ao[0];
-		effects->copy_to_rect(ao_buf, storage->render_target_get_rd_framebuffer(rb->render_target), Rect2(Vector2(), rtsize), false, true);
+		effects->copy_to_fb_rect(ao_buf, storage->render_target_get_rd_framebuffer(rb->render_target), Rect2(Vector2(), rtsize), false, true);
 	}
 
 	if (debug_draw == RS::VIEWPORT_DEBUG_DRAW_ROUGHNESS_LIMITER && _render_buffers_get_roughness_texture(p_render_buffers).is_valid()) {
 		Size2 rtsize = storage->render_target_get_size(rb->render_target);
-		effects->copy_to_rect(_render_buffers_get_roughness_texture(p_render_buffers), storage->render_target_get_rd_framebuffer(rb->render_target), Rect2(Vector2(), rtsize), false, true);
+		effects->copy_to_fb_rect(_render_buffers_get_roughness_texture(p_render_buffers), storage->render_target_get_rd_framebuffer(rb->render_target), Rect2(Vector2(), rtsize), false, true);
 	}
 
 	if (debug_draw == RS::VIEWPORT_DEBUG_DRAW_NORMAL_BUFFER && _render_buffers_get_normal_texture(p_render_buffers).is_valid()) {
 		Size2 rtsize = storage->render_target_get_size(rb->render_target);
-		effects->copy_to_rect(_render_buffers_get_normal_texture(p_render_buffers), storage->render_target_get_rd_framebuffer(rb->render_target), Rect2(Vector2(), rtsize));
+		effects->copy_to_fb_rect(_render_buffers_get_normal_texture(p_render_buffers), storage->render_target_get_rd_framebuffer(rb->render_target), Rect2(Vector2(), rtsize), false, false);
 	}
 }
 
@@ -3535,13 +3586,14 @@ RID RasterizerSceneRD::render_buffers_get_ao_texture(RID p_render_buffers) {
 	return rb->ssao.ao_full.is_valid() ? rb->ssao.ao_full : rb->ssao.ao[0];
 }
 
-void RasterizerSceneRD::render_buffers_configure(RID p_render_buffers, RID p_render_target, int p_width, int p_height, RS::ViewportMSAA p_msaa) {
+void RasterizerSceneRD::render_buffers_configure(RID p_render_buffers, RID p_render_target, int p_width, int p_height, RS::ViewportMSAA p_msaa, RenderingServer::ViewportScreenSpaceAA p_screen_space_aa) {
 
 	RenderBuffers *rb = render_buffers_owner.getornull(p_render_buffers);
 	rb->width = p_width;
 	rb->height = p_height;
 	rb->render_target = p_render_target;
 	rb->msaa = p_msaa;
+	rb->screen_space_aa = p_screen_space_aa;
 	_free_render_buffer_data(rb);
 
 	{
@@ -3549,7 +3601,12 @@ void RasterizerSceneRD::render_buffers_configure(RID p_render_buffers, RID p_ren
 		tf.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
 		tf.width = rb->width;
 		tf.height = rb->height;
-		tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT;
+		tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
+		if (rb->msaa != RS::VIEWPORT_MSAA_DISABLED) {
+			tf.usage_bits |= RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+		} else {
+			tf.usage_bits |= RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT;
+		}
 
 		rb->texture = RD::get_singleton()->texture_create(tf, RD::TextureView());
 	}
@@ -3560,6 +3617,9 @@ void RasterizerSceneRD::render_buffers_configure(RID p_render_buffers, RID p_ren
 		tf.width = p_width;
 		tf.height = p_height;
 		tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+		if (rb->msaa != RS::VIEWPORT_MSAA_DISABLED) {
+			tf.usage_bits |= RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+		}
 
 		rb->depth_texture = RD::get_singleton()->texture_create(tf, RD::TextureView());
 	}
@@ -3581,8 +3641,86 @@ void RasterizerSceneRD::sub_surface_scattering_set_scale(float p_scale, float p_
 	sss_depth_scale = p_depth_scale;
 }
 
-void RasterizerSceneRD::shadow_filter_set(RS::ShadowFilter p_filter) {
-	shadow_filter = p_filter;
+void RasterizerSceneRD::shadows_quality_set(RS::ShadowQuality p_quality) {
+
+	ERR_FAIL_INDEX_MSG(p_quality, RS::SHADOW_QUALITY_MAX, "Shadow quality too high, please see RenderingServer's ShadowQuality enum");
+
+	if (shadows_quality != p_quality) {
+		shadows_quality = p_quality;
+
+		switch (shadows_quality) {
+			case RS::SHADOW_QUALITY_HARD: {
+				penumbra_shadow_samples = 4;
+				soft_shadow_samples = 1;
+				shadows_quality_radius = 1.0;
+			} break;
+			case RS::SHADOW_QUALITY_SOFT_LOW: {
+				penumbra_shadow_samples = 8;
+				soft_shadow_samples = 4;
+				shadows_quality_radius = 2.0;
+			} break;
+			case RS::SHADOW_QUALITY_SOFT_MEDIUM: {
+				penumbra_shadow_samples = 12;
+				soft_shadow_samples = 8;
+				shadows_quality_radius = 2.0;
+			} break;
+			case RS::SHADOW_QUALITY_SOFT_HIGH: {
+				penumbra_shadow_samples = 24;
+				soft_shadow_samples = 16;
+				shadows_quality_radius = 3.0;
+			} break;
+			case RS::SHADOW_QUALITY_SOFT_ULTRA: {
+				penumbra_shadow_samples = 32;
+				soft_shadow_samples = 32;
+				shadows_quality_radius = 4.0;
+			} break;
+			case RS::SHADOW_QUALITY_MAX:
+				break;
+		}
+		get_vogel_disk(penumbra_shadow_kernel, penumbra_shadow_samples);
+		get_vogel_disk(soft_shadow_kernel, soft_shadow_samples);
+	}
+}
+
+void RasterizerSceneRD::directional_shadow_quality_set(RS::ShadowQuality p_quality) {
+
+	ERR_FAIL_INDEX_MSG(p_quality, RS::SHADOW_QUALITY_MAX, "Shadow quality too high, please see RenderingServer's ShadowQuality enum");
+
+	if (directional_shadow_quality != p_quality) {
+		directional_shadow_quality = p_quality;
+
+		switch (directional_shadow_quality) {
+			case RS::SHADOW_QUALITY_HARD: {
+				directional_penumbra_shadow_samples = 4;
+				directional_soft_shadow_samples = 1;
+				directional_shadow_quality_radius = 1.0;
+			} break;
+			case RS::SHADOW_QUALITY_SOFT_LOW: {
+				directional_penumbra_shadow_samples = 8;
+				directional_soft_shadow_samples = 4;
+				directional_shadow_quality_radius = 2.0;
+			} break;
+			case RS::SHADOW_QUALITY_SOFT_MEDIUM: {
+				directional_penumbra_shadow_samples = 12;
+				directional_soft_shadow_samples = 8;
+				directional_shadow_quality_radius = 2.0;
+			} break;
+			case RS::SHADOW_QUALITY_SOFT_HIGH: {
+				directional_penumbra_shadow_samples = 24;
+				directional_soft_shadow_samples = 16;
+				directional_shadow_quality_radius = 3.0;
+			} break;
+			case RS::SHADOW_QUALITY_SOFT_ULTRA: {
+				directional_penumbra_shadow_samples = 32;
+				directional_soft_shadow_samples = 32;
+				directional_shadow_quality_radius = 4.0;
+			} break;
+			case RS::SHADOW_QUALITY_MAX:
+				break;
+		}
+		get_vogel_disk(directional_penumbra_shadow_kernel, directional_penumbra_shadow_samples);
+		get_vogel_disk(directional_soft_shadow_kernel, directional_soft_shadow_samples);
+	}
 }
 
 int RasterizerSceneRD::get_roughness_layers() const {
@@ -3599,7 +3737,7 @@ RasterizerSceneRD::RenderBufferData *RasterizerSceneRD::render_buffers_get_data(
 	return rb->data;
 }
 
-void RasterizerSceneRD::render_scene(RID p_render_buffers, const Transform &p_cam_transform, const CameraMatrix &p_cam_projection, bool p_cam_ortogonal, InstanceBase **p_cull_result, int p_cull_count, RID *p_light_cull_result, int p_light_cull_count, RID *p_reflection_probe_cull_result, int p_reflection_probe_cull_count, RID *p_gi_probe_cull_result, int p_gi_probe_cull_count, RID p_environment, RID p_camera_effects, RID p_shadow_atlas, RID p_reflection_atlas, RID p_reflection_probe, int p_reflection_probe_pass) {
+void RasterizerSceneRD::render_scene(RID p_render_buffers, const Transform &p_cam_transform, const CameraMatrix &p_cam_projection, bool p_cam_ortogonal, InstanceBase **p_cull_result, int p_cull_count, RID *p_light_cull_result, int p_light_cull_count, RID *p_reflection_probe_cull_result, int p_reflection_probe_cull_count, RID *p_gi_probe_cull_result, int p_gi_probe_cull_count, RID *p_decal_cull_result, int p_decal_cull_count, RID p_environment, RID p_camera_effects, RID p_shadow_atlas, RID p_reflection_atlas, RID p_reflection_probe, int p_reflection_probe_pass) {
 
 	Color clear_color;
 	if (p_render_buffers.is_valid()) {
@@ -3610,7 +3748,7 @@ void RasterizerSceneRD::render_scene(RID p_render_buffers, const Transform &p_ca
 		clear_color = storage->get_default_clear_color();
 	}
 
-	_render_scene(p_render_buffers, p_cam_transform, p_cam_projection, p_cam_ortogonal, p_cull_result, p_cull_count, p_light_cull_result, p_light_cull_count, p_reflection_probe_cull_result, p_reflection_probe_cull_count, p_gi_probe_cull_result, p_gi_probe_cull_count, p_environment, p_camera_effects, p_shadow_atlas, p_reflection_atlas, p_reflection_probe, p_reflection_probe_pass, clear_color);
+	_render_scene(p_render_buffers, p_cam_transform, p_cam_projection, p_cam_ortogonal, p_cull_result, p_cull_count, p_light_cull_result, p_light_cull_count, p_reflection_probe_cull_result, p_reflection_probe_cull_count, p_gi_probe_cull_result, p_gi_probe_cull_count, p_decal_cull_result, p_decal_cull_count, p_environment, p_camera_effects, p_shadow_atlas, p_reflection_atlas, p_reflection_probe, p_reflection_probe_pass, clear_color);
 
 	if (p_render_buffers.is_valid()) {
 		RENDER_TIMESTAMP("Tonemap");
@@ -3626,7 +3764,7 @@ void RasterizerSceneRD::render_shadow(RID p_light, RID p_shadow_atlas, int p_pas
 	ERR_FAIL_COND(!light_instance);
 
 	Rect2i atlas_rect;
-	RID atlas_fb;
+	RID atlas_texture;
 
 	bool using_dual_paraboloid = false;
 	bool using_dual_paraboloid_flip = false;
@@ -3700,7 +3838,7 @@ void RasterizerSceneRD::render_shadow(RID p_light, RID p_shadow_atlas, int p_pas
 		ShadowMap *shadow_map = _get_shadow_map(atlas_rect.size);
 		render_fb = shadow_map->fb;
 		render_texture = shadow_map->depth;
-		atlas_fb = directional_shadow.fb;
+		atlas_texture = directional_shadow.depth;
 
 	} else {
 		//set from shadow atlas
@@ -3727,7 +3865,7 @@ void RasterizerSceneRD::render_shadow(RID p_light, RID p_shadow_atlas, int p_pas
 
 		atlas_rect.size.width = shadow_size;
 		atlas_rect.size.height = shadow_size;
-		atlas_fb = shadow_atlas->fb;
+		atlas_texture = shadow_atlas->depth;
 
 		zfar = storage->light_get_param(light_instance->light, RS::LIGHT_PARAM_RANGE);
 		bias = storage->light_get_param(light_instance->light, RS::LIGHT_PARAM_SHADOW_BIAS);
@@ -3783,9 +3921,9 @@ void RasterizerSceneRD::render_shadow(RID p_light, RID p_shadow_atlas, int p_pas
 		if (finalize_cubemap) {
 			//reblit
 			atlas_rect.size.height /= 2;
-			storage->get_effects()->copy_cubemap_to_dp(render_texture, atlas_fb, atlas_rect, light_projection.get_z_near(), light_projection.get_z_far(), 0.0, false);
+			storage->get_effects()->copy_cubemap_to_dp(render_texture, atlas_texture, atlas_rect, light_projection.get_z_near(), light_projection.get_z_far(), 0.0, false);
 			atlas_rect.position.y += atlas_rect.size.height;
-			storage->get_effects()->copy_cubemap_to_dp(render_texture, atlas_fb, atlas_rect, light_projection.get_z_near(), light_projection.get_z_far(), 0.0, true);
+			storage->get_effects()->copy_cubemap_to_dp(render_texture, atlas_texture, atlas_rect, light_projection.get_z_near(), light_projection.get_z_far(), 0.0, true);
 		}
 	} else {
 		//render shadow
@@ -3794,9 +3932,9 @@ void RasterizerSceneRD::render_shadow(RID p_light, RID p_shadow_atlas, int p_pas
 
 		//copy to atlas
 		if (use_linear_depth) {
-			storage->get_effects()->copy_to_rect_and_linearize(render_texture, atlas_fb, atlas_rect, true, znear, zfar);
+			storage->get_effects()->copy_depth_to_rect_and_linearize(render_texture, atlas_texture, atlas_rect, true, znear, zfar);
 		} else {
-			storage->get_effects()->copy_to_rect(render_texture, atlas_fb, atlas_rect, true);
+			storage->get_effects()->copy_depth_to_rect(render_texture, atlas_texture, atlas_rect, true);
 		}
 
 		//does not work from depth to color
@@ -3830,6 +3968,8 @@ bool RasterizerSceneRD::free(RID p_rid) {
 		//ReflectionProbeInstance *rpi = reflection_probe_instance_owner.getornull(p_rid);
 		reflection_probe_release_atlas_index(p_rid);
 		reflection_probe_instance_owner.free(p_rid);
+	} else if (decal_instance_owner.owns(p_rid)) {
+		decal_instance_owner.free(p_rid);
 	} else if (gi_probe_instance_owner.owns(p_rid)) {
 		GIProbeInstance *gi_probe = gi_probe_instance_owner.getornull(p_rid);
 		if (gi_probe->texture.is_valid()) {
@@ -4073,21 +4213,25 @@ RasterizerSceneRD::RasterizerSceneRD(RasterizerStorageRD *p_storage) {
 		actions.renames["QUARTER_RES_COLOR"] = "quarter_res_color";
 		actions.renames["RADIANCE"] = "radiance";
 		actions.renames["LIGHT0_ENABLED"] = "directional_lights.data[0].enabled";
-		actions.renames["LIGHT0_DIRECTION"] = "directional_lights.data[0].direction";
-		actions.renames["LIGHT0_ENERGY"] = "directional_lights.data[0].energy";
-		actions.renames["LIGHT0_COLOR"] = "directional_lights.data[0].color";
+		actions.renames["LIGHT0_DIRECTION"] = "directional_lights.data[0].direction_energy.xyz";
+		actions.renames["LIGHT0_ENERGY"] = "directional_lights.data[0].direction_energy.w";
+		actions.renames["LIGHT0_COLOR"] = "directional_lights.data[0].color_size.xyz";
+		actions.renames["LIGHT0_SIZE"] = "directional_lights.data[0].color_size.w";
 		actions.renames["LIGHT1_ENABLED"] = "directional_lights.data[1].enabled";
-		actions.renames["LIGHT1_DIRECTION"] = "directional_lights.data[1].direction";
-		actions.renames["LIGHT1_ENERGY"] = "directional_lights.data[1].energy";
-		actions.renames["LIGHT1_COLOR"] = "directional_lights.data[1].color";
+		actions.renames["LIGHT1_DIRECTION"] = "directional_lights.data[1].direction_energy.xyz";
+		actions.renames["LIGHT1_ENERGY"] = "directional_lights.data[1].direction_energy.w";
+		actions.renames["LIGHT1_COLOR"] = "directional_lights.data[1].color_size.xyz";
+		actions.renames["LIGHT1_SIZE"] = "directional_lights.data[1].color_size.w";
 		actions.renames["LIGHT2_ENABLED"] = "directional_lights.data[2].enabled";
-		actions.renames["LIGHT2_DIRECTION"] = "directional_lights.data[2].direction";
-		actions.renames["LIGHT2_ENERGY"] = "directional_lights.data[2].energy";
-		actions.renames["LIGHT2_COLOR"] = "directional_lights.data[2].color";
+		actions.renames["LIGHT2_DIRECTION"] = "directional_lights.data[2].direction_energy.xyz";
+		actions.renames["LIGHT2_ENERGY"] = "directional_lights.data[2].direction_energy.w";
+		actions.renames["LIGHT2_COLOR"] = "directional_lights.data[2].color_size.xyz";
+		actions.renames["LIGHT2_SIZE"] = "directional_lights.data[2].color_size.w";
 		actions.renames["LIGHT3_ENABLED"] = "directional_lights.data[3].enabled";
-		actions.renames["LIGHT3_DIRECTION"] = "directional_lights.data[3].direction";
-		actions.renames["LIGHT3_ENERGY"] = "directional_lights.data[3].energy";
-		actions.renames["LIGHT3_COLOR"] = "directional_lights.data[3].color";
+		actions.renames["LIGHT3_DIRECTION"] = "directional_lights.data[3].direction_energy.xyz";
+		actions.renames["LIGHT3_ENERGY"] = "directional_lights.data[3].direction_energy.w";
+		actions.renames["LIGHT3_COLOR"] = "directional_lights.data[3].color_size.xyz";
+		actions.renames["LIGHT3_SIZE"] = "directional_lights.data[3].color_size.w";
 		actions.renames["AT_CUBEMAP_PASS"] = "AT_CUBEMAP_PASS";
 		actions.renames["AT_HALF_RES_PASS"] = "AT_HALF_RES_PASS";
 		actions.renames["AT_QUARTER_RES_PASS"] = "AT_QUARTER_RES_PASS";
@@ -4103,6 +4247,7 @@ RasterizerSceneRD::RasterizerSceneRD(RasterizerStorageRD *p_storage) {
 
 		actions.default_filter = ShaderLanguage::FILTER_LINEAR_MIPMAP;
 		actions.default_repeat = ShaderLanguage::REPEAT_ENABLE;
+		actions.global_buffer_array_variable = "global_variables.data";
 
 		sky_shader.compiler.initialize(actions);
 	}
@@ -4110,7 +4255,7 @@ RasterizerSceneRD::RasterizerSceneRD(RasterizerStorageRD *p_storage) {
 	{
 		// default material and shader for sky shader
 		sky_shader.default_shader = storage->shader_create();
-		storage->shader_set_code(sky_shader.default_shader, "shader_type sky; void fragment() { COLOR = mix(vec3(0.3), vec3(0.2, 0.4, 0.9), smoothstep(0.0, 0.05, EYEDIR.y)); } \n");
+		storage->shader_set_code(sky_shader.default_shader, "shader_type sky; void fragment() { COLOR = vec3(0.0); } \n");
 		sky_shader.default_material = storage->material_create();
 		storage->material_set_shader(sky_shader.default_material, sky_shader.default_shader);
 
@@ -4140,20 +4285,33 @@ RasterizerSceneRD::RasterizerSceneRD(RasterizerStorageRD *p_storage) {
 			uniforms.push_back(u);
 		}
 
+		{
+			RD::Uniform u;
+			u.type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+			u.binding = 1;
+			u.ids.push_back(storage->global_variables_get_storage_buffer());
+			uniforms.push_back(u);
+		}
+
 		sky_scene_state.sampler_uniform_set = RD::get_singleton()->uniform_set_create(uniforms, sky_shader.default_shader_rd, SKY_SET_SAMPLERS);
 	}
 
-	camera_effects_set_dof_blur_bokeh_shape(RS::DOFBokehShape(int(GLOBAL_GET("rendering/quality/filters/depth_of_field_bokeh_shape"))));
-	camera_effects_set_dof_blur_quality(RS::DOFBlurQuality(int(GLOBAL_GET("rendering/quality/filters/depth_of_field_bokeh_quality"))), GLOBAL_GET("rendering/quality/filters/depth_of_field_use_jitter"));
+	camera_effects_set_dof_blur_bokeh_shape(RS::DOFBokehShape(int(GLOBAL_GET("rendering/quality/depth_of_field/depth_of_field_bokeh_shape"))));
+	camera_effects_set_dof_blur_quality(RS::DOFBlurQuality(int(GLOBAL_GET("rendering/quality/depth_of_field/depth_of_field_bokeh_quality"))), GLOBAL_GET("rendering/quality/depth_of_field/depth_of_field_use_jitter"));
 	environment_set_ssao_quality(RS::EnvironmentSSAOQuality(int(GLOBAL_GET("rendering/quality/ssao/quality"))), GLOBAL_GET("rendering/quality/ssao/half_size"));
-	screen_space_roughness_limiter = GLOBAL_GET("rendering/quality/filters/screen_space_roughness_limiter");
-	screen_space_roughness_limiter_curve = GLOBAL_GET("rendering/quality/filters/screen_space_roughness_limiter_curve");
+	screen_space_roughness_limiter = GLOBAL_GET("rendering/quality/screen_filters/screen_space_roughness_limiter");
+	screen_space_roughness_limiter_curve = GLOBAL_GET("rendering/quality/screen_filters/screen_space_roughness_limiter_curve");
 	glow_bicubic_upscale = int(GLOBAL_GET("rendering/quality/glow/upscale_mode")) > 0;
 	ssr_roughness_quality = RS::EnvironmentSSRRoughnessQuality(int(GLOBAL_GET("rendering/quality/screen_space_reflection/roughness_quality")));
 	sss_quality = RS::SubSurfaceScatteringQuality(int(GLOBAL_GET("rendering/quality/subsurface_scattering/subsurface_scattering_quality")));
 	sss_scale = GLOBAL_GET("rendering/quality/subsurface_scattering/subsurface_scattering_scale");
 	sss_depth_scale = GLOBAL_GET("rendering/quality/subsurface_scattering/subsurface_scattering_depth_scale");
-	shadow_filter = RS::ShadowFilter(int(GLOBAL_GET("rendering/quality/shadows/filter_mode")));
+	directional_penumbra_shadow_kernel = memnew_arr(float, 128);
+	directional_soft_shadow_kernel = memnew_arr(float, 128);
+	penumbra_shadow_kernel = memnew_arr(float, 128);
+	soft_shadow_kernel = memnew_arr(float, 128);
+	shadows_quality_set(RS::ShadowQuality(int(GLOBAL_GET("rendering/quality/shadows/soft_shadow_quality"))));
+	directional_shadow_quality_set(RS::ShadowQuality(int(GLOBAL_GET("rendering/quality/directional_shadow/soft_shadow_quality"))));
 }
 
 RasterizerSceneRD::~RasterizerSceneRD() {
@@ -4182,4 +4340,8 @@ RasterizerSceneRD::~RasterizerSceneRD() {
 	memdelete_arr(sky_scene_state.last_frame_directional_lights);
 	storage->free(sky_shader.default_shader);
 	storage->free(sky_shader.default_material);
+	memdelete_arr(directional_penumbra_shadow_kernel);
+	memdelete_arr(directional_soft_shadow_kernel);
+	memdelete_arr(penumbra_shadow_kernel);
+	memdelete_arr(soft_shadow_kernel);
 }

@@ -638,12 +638,12 @@ uint16_t GDScript::get_rpc_method_id(const StringName &p_method) const {
 }
 
 StringName GDScript::get_rpc_method(const uint16_t p_rpc_method_id) const {
-	ERR_FAIL_COND_V(p_rpc_method_id >= rpc_functions.size(), StringName());
+	if (p_rpc_method_id >= rpc_functions.size()) return StringName();
 	return rpc_functions[p_rpc_method_id].name;
 }
 
 MultiplayerAPI::RPCMode GDScript::get_rpc_mode_by_id(const uint16_t p_rpc_method_id) const {
-	ERR_FAIL_COND_V(p_rpc_method_id >= rpc_functions.size(), MultiplayerAPI::RPC_MODE_DISABLED);
+	if (p_rpc_method_id >= rpc_functions.size()) return MultiplayerAPI::RPC_MODE_DISABLED;
 	return rpc_functions[p_rpc_method_id].mode;
 }
 
@@ -665,12 +665,12 @@ uint16_t GDScript::get_rset_property_id(const StringName &p_variable) const {
 }
 
 StringName GDScript::get_rset_property(const uint16_t p_rset_member_id) const {
-	ERR_FAIL_COND_V(p_rset_member_id >= rpc_variables.size(), StringName());
+	if (p_rset_member_id >= rpc_variables.size()) return StringName();
 	return rpc_variables[p_rset_member_id].name;
 }
 
 MultiplayerAPI::RPCMode GDScript::get_rset_mode_by_id(const uint16_t p_rset_member_id) const {
-	ERR_FAIL_COND_V(p_rset_member_id >= rpc_variables.size(), MultiplayerAPI::RPC_MODE_DISABLED);
+	if (p_rset_member_id >= rpc_variables.size()) return MultiplayerAPI::RPC_MODE_DISABLED;
 	return rpc_variables[p_rset_member_id].mode;
 }
 
@@ -893,6 +893,24 @@ StringName GDScript::debug_get_member_by_index(int p_idx) const {
 Ref<GDScript> GDScript::get_base() const {
 
 	return base;
+}
+
+bool GDScript::inherits_script(const Ref<Script> &p_script) const {
+	Ref<GDScript> gd = p_script;
+	if (gd.is_null()) {
+		return false;
+	}
+
+	const GDScript *s = this;
+
+	while (s) {
+		if (s == p_script.ptr()) {
+			return true;
+		}
+		s = s->_base;
+	}
+
+	return false;
 }
 
 bool GDScript::has_script_signal(const StringName &p_signal) const {
@@ -2257,7 +2275,7 @@ Ref<GDScript> GDScriptLanguage::get_orphan_subclass(const String &p_qualified_na
 
 /*************** RESOURCE ***************/
 
-RES ResourceFormatLoaderGDScript::load(const String &p_path, const String &p_original_path, Error *r_error, bool p_use_sub_threads, float *r_progress) {
+RES ResourceFormatLoaderGDScript::load(const String &p_path, const String &p_original_path, Error *r_error, bool p_use_sub_threads, float *r_progress, bool p_no_cache) {
 
 	if (r_error)
 		*r_error = ERR_FILE_CANT_OPEN;

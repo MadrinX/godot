@@ -30,7 +30,7 @@
 
 #include "visual_shader_editor_plugin.h"
 
-#include "core/input/input_filter.h"
+#include "core/input/input.h"
 #include "core/io/resource_loader.h"
 #include "core/math/math_defs.h"
 #include "core/os/keyboard.h"
@@ -1635,7 +1635,7 @@ void VisualShaderEditor::_graph_gui_input(const Ref<InputEvent> &p_event) {
 			popup_menu->set_item_disabled(NodeMenuOptions::DELETE, to_change.empty());
 			popup_menu->set_item_disabled(NodeMenuOptions::DUPLICATE, to_change.empty());
 			menu_point = graph->get_local_mouse_position();
-			Point2 gpos = InputFilter::get_singleton()->get_mouse_position();
+			Point2 gpos = Input::get_singleton()->get_mouse_position();
 			popup_menu->set_position(gpos);
 			popup_menu->popup();
 		}
@@ -1648,7 +1648,7 @@ void VisualShaderEditor::_show_members_dialog(bool at_mouse_pos) {
 		saved_node_pos_dirty = true;
 		saved_node_pos = graph->get_local_mouse_position();
 
-		Point2 gpos = InputFilter::get_singleton()->get_mouse_position();
+		Point2 gpos = Input::get_singleton()->get_mouse_position();
 		members_dialog->popup();
 		members_dialog->set_position(gpos);
 	} else {
@@ -2261,6 +2261,12 @@ void VisualShaderEditor::_show_preview_text() {
 	}
 }
 
+static ShaderLanguage::DataType _get_global_variable_type(const StringName &p_variable) {
+
+	RS::GlobalVariableType gvt = RS::get_singleton()->global_variable_get_type(p_variable);
+	return RS::global_variable_type_get_shader_datatype(gvt);
+}
+
 void VisualShaderEditor::_update_preview() {
 
 	if (!preview_showed) {
@@ -2274,7 +2280,7 @@ void VisualShaderEditor::_update_preview() {
 
 	ShaderLanguage sl;
 
-	Error err = sl.compile(code, ShaderTypes::get_singleton()->get_functions(RenderingServer::ShaderMode(visual_shader->get_mode())), ShaderTypes::get_singleton()->get_modes(RenderingServer::ShaderMode(visual_shader->get_mode())), ShaderTypes::get_singleton()->get_types());
+	Error err = sl.compile(code, ShaderTypes::get_singleton()->get_functions(RenderingServer::ShaderMode(visual_shader->get_mode())), ShaderTypes::get_singleton()->get_modes(RenderingServer::ShaderMode(visual_shader->get_mode())), ShaderTypes::get_singleton()->get_types(), _get_global_variable_type);
 
 	for (int i = 0; i < preview_text->get_line_count(); i++) {
 		preview_text->set_line_as_marked(i, false);
@@ -3291,7 +3297,7 @@ void EditorInspectorShaderModePlugin::parse_begin(Object *p_object) {
 	//do none
 }
 
-bool EditorInspectorShaderModePlugin::parse_property(Object *p_object, Variant::Type p_type, const String &p_path, PropertyHint p_hint, const String &p_hint_text, int p_usage) {
+bool EditorInspectorShaderModePlugin::parse_property(Object *p_object, Variant::Type p_type, const String &p_path, PropertyHint p_hint, const String &p_hint_text, int p_usage, bool p_wide) {
 
 	if (p_path == "mode" && p_object->is_class("VisualShader") && p_type == Variant::INT) {
 

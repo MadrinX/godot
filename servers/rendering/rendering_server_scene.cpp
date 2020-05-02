@@ -155,6 +155,20 @@ void *RenderingServerScene::_instance_pair(void *p_self, OctreeElementID, Instan
 		geom->reflection_dirty = true;
 
 		return E; //this element should make freeing faster
+	} else if (B->base_type == RS::INSTANCE_DECAL && ((1 << A->base_type) & RS::INSTANCE_GEOMETRY_MASK)) {
+
+		InstanceDecalData *decal = static_cast<InstanceDecalData *>(B->base_data);
+		InstanceGeometryData *geom = static_cast<InstanceGeometryData *>(A->base_data);
+
+		InstanceDecalData::PairInfo pinfo;
+		pinfo.geometry = A;
+		pinfo.L = geom->decals.push_back(B);
+
+		List<InstanceDecalData::PairInfo>::Element *E = decal->geometries.push_back(pinfo);
+
+		geom->decal_dirty = true;
+
+		return E; //this element should make freeing faster
 	} else if (B->base_type == RS::INSTANCE_LIGHTMAP_CAPTURE && ((1 << A->base_type) & RS::INSTANCE_GEOMETRY_MASK)) {
 
 		InstanceLightmapCaptureData *lightmap_capture = static_cast<InstanceLightmapCaptureData *>(B->base_data);
@@ -233,6 +247,17 @@ void RenderingServerScene::_instance_unpair(void *p_self, OctreeElementID, Insta
 		reflection_probe->geometries.erase(E);
 
 		geom->reflection_dirty = true;
+	} else if (B->base_type == RS::INSTANCE_DECAL && ((1 << A->base_type) & RS::INSTANCE_GEOMETRY_MASK)) {
+
+		InstanceDecalData *decal = static_cast<InstanceDecalData *>(B->base_data);
+		InstanceGeometryData *geom = static_cast<InstanceGeometryData *>(A->base_data);
+
+		List<InstanceDecalData::PairInfo>::Element *E = reinterpret_cast<List<InstanceDecalData::PairInfo>::Element *>(udata);
+
+		geom->decals.erase(E->get().L);
+		decal->geometries.erase(E);
+
+		geom->decal_dirty = true;
 	} else if (B->base_type == RS::INSTANCE_LIGHTMAP_CAPTURE && ((1 << A->base_type) & RS::INSTANCE_GEOMETRY_MASK)) {
 
 		InstanceLightmapCaptureData *lightmap_capture = static_cast<InstanceLightmapCaptureData *>(B->base_data);
@@ -387,6 +412,12 @@ void RenderingServerScene::instance_set_base(RID p_instance, RID p_base) {
 					reflection_probe_render_list.remove(&reflection_probe->update_list);
 				}
 			} break;
+			case RS::INSTANCE_DECAL: {
+
+				InstanceDecalData *decal = static_cast<InstanceDecalData *>(instance->base_data);
+				RSG::scene_render->free(decal->instance);
+
+			} break;
 			case RS::INSTANCE_LIGHTMAP_CAPTURE: {
 
 				InstanceLightmapCaptureData *lightmap_capture = static_cast<InstanceLightmapCaptureData *>(instance->base_data);
@@ -475,6 +506,14 @@ void RenderingServerScene::instance_set_base(RID p_instance, RID p_base) {
 				instance->base_data = reflection_probe;
 
 				reflection_probe->instance = RSG::scene_render->reflection_probe_instance_create(p_base);
+			} break;
+			case RS::INSTANCE_DECAL: {
+
+				InstanceDecalData *decal = memnew(InstanceDecalData);
+				decal->owner = instance;
+				instance->base_data = decal;
+
+				decal->instance = RSG::scene_render->decal_instance_create(p_base);
 			} break;
 			case RS::INSTANCE_LIGHTMAP_CAPTURE: {
 
@@ -688,6 +727,12 @@ void RenderingServerScene::instance_set_visible(RID p_instance, bool p_visible) 
 		case RS::INSTANCE_REFLECTION_PROBE: {
 			if (instance->octree_id && instance->scenario) {
 				instance->scenario->octree.set_pairable(instance->octree_id, p_visible, 1 << RS::INSTANCE_REFLECTION_PROBE, p_visible ? RS::INSTANCE_GEOMETRY_MASK : 0);
+			}
+
+		} break;
+		case RS::INSTANCE_DECAL: {
+			if (instance->octree_id && instance->scenario) {
+				instance->scenario->octree.set_pairable(instance->octree_id, p_visible, 1 << RS::INSTANCE_DECAL, p_visible ? RS::INSTANCE_GEOMETRY_MASK : 0);
 			}
 
 		} break;
@@ -923,6 +968,67 @@ void RenderingServerScene::instance_geometry_set_draw_range(RID p_instance, floa
 void RenderingServerScene::instance_geometry_set_as_instance_lod(RID p_instance, RID p_as_lod_of_instance) {
 }
 
+void RenderingServerScene::instance_geometry_set_shader_parameter(RID p_instance, const StringName &p_parameter, const Variant &p_value) {
+
+	Instance *instance = instance_owner.getornull(p_instance);
+	ERR_FAIL_COND(!instance);
+
+	Map<StringName, RasterizerScene::InstanceBase::InstanceShaderParameter>::Element *E = instance->instance_shader_parameters.find(p_parameter);
+
+	if (!E) {
+		RasterizerScene::InstanceBase::InstanceShaderParameter isp;
+		isp.index = -1;
+		isp.info = PropertyInfo();
+		isp.value = p_value;
+		instance->instance_shader_parameters[p_parameter] = isp;
+	} else {
+		E->get().value = p_value;
+		if (E->get().index >= 0 && instance->instance_allocated_shader_parameters) {
+			//update directly
+			RSG::storage->global_variables_instance_update(p_instance, E->get().index, p_value);
+		}
+	}
+}
+
+Variant RenderingServerScene::instance_geometry_get_shader_parameter(RID p_instance, const StringName &p_parameter) const {
+
+	const Instance *instance = const_cast<RenderingServerScene *>(this)->instance_owner.getornull(p_instance);
+	ERR_FAIL_COND_V(!instance, Variant());
+
+	if (instance->instance_shader_parameters.has(p_parameter)) {
+		return instance->instance_shader_parameters[p_parameter].value;
+	}
+	return Variant();
+}
+
+Variant RenderingServerScene::instance_geometry_get_shader_parameter_default_value(RID p_instance, const StringName &p_parameter) const {
+
+	const Instance *instance = const_cast<RenderingServerScene *>(this)->instance_owner.getornull(p_instance);
+	ERR_FAIL_COND_V(!instance, Variant());
+
+	if (instance->instance_shader_parameters.has(p_parameter)) {
+		return instance->instance_shader_parameters[p_parameter].default_value;
+	}
+	return Variant();
+}
+
+void RenderingServerScene::instance_geometry_get_shader_parameter_list(RID p_instance, List<PropertyInfo> *p_parameters) const {
+	const Instance *instance = const_cast<RenderingServerScene *>(this)->instance_owner.getornull(p_instance);
+	ERR_FAIL_COND(!instance);
+
+	const_cast<RenderingServerScene *>(this)->update_dirty_instances();
+
+	Vector<StringName> names;
+	for (Map<StringName, RasterizerScene::InstanceBase::InstanceShaderParameter>::Element *E = instance->instance_shader_parameters.front(); E; E = E->next()) {
+		names.push_back(E->key());
+	}
+	names.sort_custom<StringName::AlphCompare>();
+	for (int i = 0; i < names.size(); i++) {
+		PropertyInfo pinfo = instance->instance_shader_parameters[names[i]].info;
+		p_parameters->push_back(pinfo);
+	}
+}
+
 void RenderingServerScene::_update_instance(Instance *p_instance) {
 
 	p_instance->version++;
@@ -941,6 +1047,13 @@ void RenderingServerScene::_update_instance(Instance *p_instance) {
 
 		RSG::scene_render->reflection_probe_instance_set_transform(reflection_probe->instance, p_instance->transform);
 		reflection_probe->reflection_dirty = true;
+	}
+
+	if (p_instance->base_type == RS::INSTANCE_DECAL) {
+
+		InstanceDecalData *decal = static_cast<InstanceDecalData *>(p_instance->base_data);
+
+		RSG::scene_render->decal_instance_set_transform(decal->instance, p_instance->transform);
 	}
 
 	if (p_instance->base_type == RS::INSTANCE_GI_PROBE) {
@@ -1000,7 +1113,7 @@ void RenderingServerScene::_update_instance(Instance *p_instance) {
 		uint32_t pairable_mask = 0;
 		bool pairable = false;
 
-		if (p_instance->base_type == RS::INSTANCE_LIGHT || p_instance->base_type == RS::INSTANCE_REFLECTION_PROBE || p_instance->base_type == RS::INSTANCE_LIGHTMAP_CAPTURE) {
+		if (p_instance->base_type == RS::INSTANCE_LIGHT || p_instance->base_type == RS::INSTANCE_REFLECTION_PROBE || p_instance->base_type == RS::INSTANCE_DECAL || p_instance->base_type == RS::INSTANCE_LIGHTMAP_CAPTURE) {
 
 			pairable_mask = p_instance->visible ? RS::INSTANCE_GEOMETRY_MASK : 0;
 			pairable = true;
@@ -1078,6 +1191,11 @@ void RenderingServerScene::_update_instance_aabb(Instance *p_instance) {
 		case RenderingServer::INSTANCE_REFLECTION_PROBE: {
 
 			new_aabb = RSG::storage->reflection_probe_get_aabb(p_instance->base);
+
+		} break;
+		case RenderingServer::INSTANCE_DECAL: {
+
+			new_aabb = RSG::storage->decal_get_aabb(p_instance->base);
 
 		} break;
 		case RenderingServer::INSTANCE_GI_PROBE: {
@@ -1230,15 +1348,15 @@ _FORCE_INLINE_ static void _light_capture_sample_octree(const RasterizerStorage:
 
 	for (int i = 0; i < 2; i++) {
 
-		Vector3 color_x00 = color[i][0].linear_interpolate(color[i][1], pos_fract[i].x);
-		Vector3 color_xy0 = color[i][2].linear_interpolate(color[i][3], pos_fract[i].x);
-		Vector3 blend_z0 = color_x00.linear_interpolate(color_xy0, pos_fract[i].y);
+		Vector3 color_x00 = color[i][0].lerp(color[i][1], pos_fract[i].x);
+		Vector3 color_xy0 = color[i][2].lerp(color[i][3], pos_fract[i].x);
+		Vector3 blend_z0 = color_x00.lerp(color_xy0, pos_fract[i].y);
 
-		Vector3 color_x0z = color[i][4].linear_interpolate(color[i][5], pos_fract[i].x);
-		Vector3 color_xyz = color[i][6].linear_interpolate(color[i][7], pos_fract[i].x);
-		Vector3 blend_z1 = color_x0z.linear_interpolate(color_xyz, pos_fract[i].y);
+		Vector3 color_x0z = color[i][4].lerp(color[i][5], pos_fract[i].x);
+		Vector3 color_xyz = color[i][6].lerp(color[i][7], pos_fract[i].x);
+		Vector3 blend_z1 = color_x0z.lerp(color_xyz, pos_fract[i].y);
 
-		color_interp[i] = blend_z0.linear_interpolate(blend_z1, pos_fract[i].z);
+		color_interp[i] = blend_z0.lerp(blend_z1, pos_fract[i].z);
 
 		float alpha_x00 = Math::lerp(alpha[i][0], alpha[i][1], pos_fract[i].x);
 		float alpha_xy0 = Math::lerp(alpha[i][2], alpha[i][3], pos_fract[i].x);
@@ -1251,7 +1369,7 @@ _FORCE_INLINE_ static void _light_capture_sample_octree(const RasterizerStorage:
 		alpha_interp[i] = Math::lerp(alpha_z0, alpha_z1, pos_fract[i].z);
 	}
 
-	r_color = color_interp[0].linear_interpolate(color_interp[1], level_filter);
+	r_color = color_interp[0].lerp(color_interp[1], level_filter);
 	r_alpha = Math::lerp(alpha_interp[0], alpha_interp[1], level_filter);
 
 	//print_line("pos: " + p_posf + " level " + rtos(p_level) + " down to " + itos(target_level) + "." + rtos(level_filter) + " color " + r_color + " alpha " + rtos(r_alpha));
@@ -1499,7 +1617,9 @@ bool RenderingServerScene::_light_instance_update_shadow(Instance *p_instance, c
 					if (j == 0 || d_z > z_max)
 						z_max = d_z;
 				}
+
 				real_t radius = 0;
+				real_t soft_shadow_expand = 0;
 				Vector3 center;
 
 				{
@@ -1528,11 +1648,29 @@ bool RenderingServerScene::_light_instance_update_shadow(Instance *p_instance, c
 						bias_scale = radius / first_radius;
 					}
 
-					x_max_cam = x_vec.dot(center) + radius;
-					x_min_cam = x_vec.dot(center) - radius;
-					y_max_cam = y_vec.dot(center) + radius;
-					y_min_cam = y_vec.dot(center) - radius;
 					z_min_cam = z_vec.dot(center) - radius;
+
+					{
+
+						float soft_shadow_angle = RSG::storage->light_get_param(p_instance->base, RS::LIGHT_PARAM_SIZE);
+
+						if (soft_shadow_angle > 0.0 && pancake_size > 0.0) {
+
+							float z_range = (z_vec.dot(center) + radius + pancake_size) - z_min_cam;
+							soft_shadow_expand = Math::tan(Math::deg2rad(soft_shadow_angle)) * z_range;
+
+							x_max += soft_shadow_expand;
+							y_max += soft_shadow_expand;
+
+							x_min -= soft_shadow_expand;
+							y_min -= soft_shadow_expand;
+						}
+					}
+
+					x_max_cam = x_vec.dot(center) + radius + soft_shadow_expand;
+					x_min_cam = x_vec.dot(center) - radius - soft_shadow_expand;
+					y_max_cam = y_vec.dot(center) + radius + soft_shadow_expand;
+					y_min_cam = y_vec.dot(center) - radius - soft_shadow_expand;
 
 					if (depth_range_mode == RS::LIGHT_DIRECTIONAL_SHADOW_DEPTH_RANGE_STABLE) {
 						//this trick here is what stabilizes the shadow (make potential jaggies to not move)
@@ -1588,8 +1726,9 @@ bool RenderingServerScene::_light_instance_update_shadow(Instance *p_instance, c
 					}
 				}
 
-				if (cull_max > z_max)
+				if (cull_max > z_max) {
 					z_max = cull_max;
+				}
 
 				if (pancake_size > 0) {
 					z_max = z_vec.dot(center) + radius + pancake_size;
@@ -1677,11 +1816,19 @@ bool RenderingServerScene::_light_instance_update_shadow(Instance *p_instance, c
 
 					ortho_camera.set_orthogonal(-half_x, half_x, -half_y, half_y, 0, (z_max - z_min_cam));
 
+					Vector2 uv_scale(1.0 / (x_max_cam - x_min_cam), 1.0 / (y_max_cam - y_min_cam));
+
 					Transform ortho_transform;
 					ortho_transform.basis = transform.basis;
 					ortho_transform.origin = x_vec * (x_min_cam + half_x) + y_vec * (y_min_cam + half_y) + z_vec * z_max;
 
-					RSG::scene_render->light_instance_set_shadow_transform(light->instance, ortho_camera, ortho_transform, z_max - z_min_cam, distances[i + 1], i, radius * 2.0 / texture_size, bias_scale * aspect_bias_scale * min_distance_bias_scale);
+					{
+						Vector3 max_in_view = p_cam_transform.affine_inverse().xform(z_vec * cull_max);
+						Vector3 dir_in_view = p_cam_transform.xform_inv(z_vec).normalized();
+						cull_max = dir_in_view.dot(max_in_view);
+					}
+
+					RSG::scene_render->light_instance_set_shadow_transform(light->instance, ortho_camera, ortho_transform, z_max - z_min_cam, distances[i + 1], i, radius * 2.0 / texture_size, bias_scale * aspect_bias_scale * min_distance_bias_scale, z_max, uv_scale);
 				}
 
 				RSG::scene_render->render_shadow(light->instance, p_shadow_atlas, i, (RasterizerScene::InstanceBase **)instance_shadow_cull_result, cull_count);
@@ -1703,12 +1850,13 @@ bool RenderingServerScene::_light_instance_update_shadow(Instance *p_instance, c
 
 					real_t z = i == 0 ? -1 : 1;
 					Vector<Plane> planes;
-					planes.resize(5);
+					planes.resize(6);
 					planes.write[0] = light_transform.xform(Plane(Vector3(0, 0, z), radius));
 					planes.write[1] = light_transform.xform(Plane(Vector3(1, 0, z).normalized(), radius));
 					planes.write[2] = light_transform.xform(Plane(Vector3(-1, 0, z).normalized(), radius));
 					planes.write[3] = light_transform.xform(Plane(Vector3(0, 1, z).normalized(), radius));
 					planes.write[4] = light_transform.xform(Plane(Vector3(0, -1, z).normalized(), radius));
+					planes.write[5] = light_transform.xform(Plane(Vector3(0, 0, -z), 0));
 
 					int cull_count = p_scenario->octree.cull_convex(planes, instance_shadow_cull_result, MAX_INSTANCE_CULL, RS::INSTANCE_GEOMETRY_MASK);
 					Plane near_plane(light_transform.origin, light_transform.basis.get_axis(2) * z);
@@ -1883,7 +2031,7 @@ void RenderingServerScene::render_camera(RID p_render_buffers, RID p_camera, RID
 #endif
 }
 
-void RenderingServerScene::render_camera(RID p_render_buffers, Ref<ARVRInterface> &p_interface, ARVRInterface::Eyes p_eye, RID p_camera, RID p_scenario, Size2 p_viewport_size, RID p_shadow_atlas) {
+void RenderingServerScene::render_camera(RID p_render_buffers, Ref<XRInterface> &p_interface, XRInterface::Eyes p_eye, RID p_camera, RID p_scenario, Size2 p_viewport_size, RID p_shadow_atlas) {
 	// render for AR/VR interface
 
 	Camera *camera = camera_owner.getornull(p_camera);
@@ -1895,16 +2043,14 @@ void RenderingServerScene::render_camera(RID p_render_buffers, Ref<ARVRInterface
 
 	// We also ignore our camera position, it will have been positioned with a slightly old tracking position.
 	// Instead we take our origin point and have our ar/vr interface add fresh tracking data! Whoohoo!
-	Transform world_origin = ARVRServer::get_singleton()->get_world_origin();
+	Transform world_origin = XRServer::get_singleton()->get_world_origin();
 	Transform cam_transform = p_interface->get_transform_for_eye(p_eye, world_origin);
 
 	// For stereo render we only prepare for our left eye and then reuse the outcome for our right eye
-	if (p_eye == ARVRInterface::EYE_LEFT) {
-		///@TODO possibly move responsibility for this into our ARVRServer or ARVRInterface?
-
+	if (p_eye == XRInterface::EYE_LEFT) {
 		// Center our transform, we assume basis is equal.
 		Transform mono_transform = cam_transform;
-		Transform right_transform = p_interface->get_transform_for_eye(ARVRInterface::EYE_RIGHT, world_origin);
+		Transform right_transform = p_interface->get_transform_for_eye(XRInterface::EYE_RIGHT, world_origin);
 		mono_transform.origin += right_transform.origin;
 		mono_transform.origin *= 0.5;
 
@@ -1958,7 +2104,7 @@ void RenderingServerScene::render_camera(RID p_render_buffers, Ref<ARVRInterface
 
 		// now prepare our scene with our adjusted transform projection matrix
 		_prepare_scene(mono_transform, combined_matrix, false, false, camera->env, camera->effects, camera->visible_layers, p_scenario, p_shadow_atlas, RID());
-	} else if (p_eye == ARVRInterface::EYE_MONO) {
+	} else if (p_eye == XRInterface::EYE_MONO) {
 		// For mono render, prepare as per usual
 		_prepare_scene(cam_transform, camera_matrix, false, false, camera->env, camera->effects, camera->visible_layers, p_scenario, p_shadow_atlas, RID());
 	}
@@ -1993,6 +2139,7 @@ void RenderingServerScene::_prepare_scene(const Transform p_cam_transform, const
 	light_cull_count = 0;
 
 	reflection_probe_cull_count = 0;
+	decal_cull_count = 0;
 	gi_probe_cull_count = 0;
 
 	//light_samplers_culled=0;
@@ -2060,6 +2207,18 @@ void RenderingServerScene::_prepare_scene(const Transform p_cam_transform, const
 							reflection_probe_cull_count++;
 						}
 					}
+				}
+			}
+		} else if (ins->base_type == RS::INSTANCE_DECAL && ins->visible) {
+
+			if (decal_cull_count < MAX_DECALS_CULLED) {
+
+				InstanceDecalData *decal = static_cast<InstanceDecalData *>(ins->base_data);
+
+				if (!decal->geometries.empty()) {
+					//do not add this decal if no geometry is affected by it..
+					decal_instance_cull_result[decal_cull_count] = decal->instance;
+					decal_cull_count++;
 				}
 			}
 
@@ -2329,7 +2488,7 @@ void RenderingServerScene::_render_scene(RID p_render_buffers, const Transform p
 	/* PROCESS GEOMETRY AND DRAW SCENE */
 
 	RENDER_TIMESTAMP("Render Scene ");
-	RSG::scene_render->render_scene(p_render_buffers, p_cam_transform, p_cam_projection, p_cam_orthogonal, (RasterizerScene::InstanceBase **)instance_cull_result, instance_cull_count, light_instance_cull_result, light_cull_count + directional_light_count, reflection_probe_instance_cull_result, reflection_probe_cull_count, gi_probe_instance_cull_result, gi_probe_cull_count, environment, camera_effects, p_shadow_atlas, p_reflection_probe.is_valid() ? RID() : scenario->reflection_atlas, p_reflection_probe, p_reflection_probe_pass);
+	RSG::scene_render->render_scene(p_render_buffers, p_cam_transform, p_cam_projection, p_cam_orthogonal, (RasterizerScene::InstanceBase **)instance_cull_result, instance_cull_count, light_instance_cull_result, light_cull_count + directional_light_count, reflection_probe_instance_cull_result, reflection_probe_cull_count, gi_probe_instance_cull_result, gi_probe_cull_count, decal_instance_cull_result, decal_cull_count, environment, camera_effects, p_shadow_atlas, p_reflection_probe.is_valid() ? RID() : scenario->reflection_atlas, p_reflection_probe, p_reflection_probe_pass);
 }
 
 void RenderingServerScene::render_empty_scene(RID p_render_buffers, RID p_scenario, RID p_shadow_atlas) {
@@ -2344,7 +2503,7 @@ void RenderingServerScene::render_empty_scene(RID p_render_buffers, RID p_scenar
 	else
 		environment = scenario->fallback_environment;
 	RENDER_TIMESTAMP("Render Empty Scene ");
-	RSG::scene_render->render_scene(p_render_buffers, Transform(), CameraMatrix(), true, nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, environment, RID(), p_shadow_atlas, scenario->reflection_atlas, RID(), 0);
+	RSG::scene_render->render_scene(p_render_buffers, Transform(), CameraMatrix(), true, nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, environment, RID(), p_shadow_atlas, scenario->reflection_atlas, RID(), 0);
 #endif
 }
 
@@ -2664,6 +2823,35 @@ void RenderingServerScene::render_probes() {
 	}
 }
 
+void RenderingServerScene::_update_instance_shader_parameters_from_material(Map<StringName, RasterizerScene::InstanceBase::InstanceShaderParameter> &isparams, const Map<StringName, RasterizerScene::InstanceBase::InstanceShaderParameter> &existing_isparams, RID p_material) {
+
+	List<RasterizerStorage::InstanceShaderParam> plist;
+	RSG::storage->material_get_instance_shader_parameters(p_material, &plist);
+	for (List<RasterizerStorage::InstanceShaderParam>::Element *E = plist.front(); E; E = E->next()) {
+		StringName name = E->get().info.name;
+		if (isparams.has(name)) {
+			if (isparams[name].info.type != E->get().info.type) {
+				WARN_PRINT("More than one material in instance export the same instance shader uniform '" + E->get().info.name + "', but they do it with different data types. Only the first one (in order) will display correctly.");
+			}
+			if (isparams[name].index != E->get().index) {
+				WARN_PRINT("More than one material in instance export the same instance shader uniform '" + E->get().info.name + "', but they do it with different indices. Only the first one (in order) will display correctly.");
+			}
+			continue; //first one found always has priority
+		}
+
+		RasterizerScene::InstanceBase::InstanceShaderParameter isp;
+		isp.index = E->get().index;
+		isp.info = E->get().info;
+		isp.default_value = E->get().default_value;
+		if (existing_isparams.has(name)) {
+			isp.value = existing_isparams[name].value;
+		} else {
+			isp.value = E->get().default_value;
+		}
+		isparams[name] = isp;
+	}
+}
+
 void RenderingServerScene::_update_dirty_instance(Instance *p_instance) {
 
 	if (p_instance->update_aabb) {
@@ -2703,12 +2891,18 @@ void RenderingServerScene::_update_dirty_instance(Instance *p_instance) {
 
 			bool can_cast_shadows = true;
 			bool is_animated = false;
+			Map<StringName, RasterizerScene::InstanceBase::InstanceShaderParameter> isparams;
 
 			if (p_instance->cast_shadows == RS::SHADOW_CASTING_SETTING_OFF) {
 				can_cast_shadows = false;
-			} else if (p_instance->material_override.is_valid()) {
-				can_cast_shadows = RSG::storage->material_casts_shadows(p_instance->material_override);
+			}
+
+			if (p_instance->material_override.is_valid()) {
+				if (!RSG::storage->material_casts_shadows(p_instance->material_override)) {
+					can_cast_shadows = false;
+				}
 				is_animated = RSG::storage->material_is_animated(p_instance->material_override);
+				_update_instance_shader_parameters_from_material(isparams, p_instance->instance_shader_parameters, p_instance->material_override);
 			} else {
 
 				if (p_instance->base_type == RS::INSTANCE_MESH) {
@@ -2732,6 +2926,8 @@ void RenderingServerScene::_update_dirty_instance(Instance *p_instance) {
 								if (RSG::storage->material_is_animated(mat)) {
 									is_animated = true;
 								}
+
+								_update_instance_shader_parameters_from_material(isparams, p_instance->instance_shader_parameters, mat);
 
 								RSG::storage->material_update_dependency(mat, p_instance);
 							}
@@ -2765,6 +2961,8 @@ void RenderingServerScene::_update_dirty_instance(Instance *p_instance) {
 									is_animated = true;
 								}
 
+								_update_instance_shader_parameters_from_material(isparams, p_instance->instance_shader_parameters, mat);
+
 								RSG::storage->material_update_dependency(mat, p_instance);
 							}
 						}
@@ -2779,10 +2977,16 @@ void RenderingServerScene::_update_dirty_instance(Instance *p_instance) {
 
 					RID mat = RSG::storage->immediate_get_material(p_instance->base);
 
-					can_cast_shadows = !mat.is_valid() || RSG::storage->material_casts_shadows(mat);
+					if (!(!mat.is_valid() || RSG::storage->material_casts_shadows(mat))) {
+						can_cast_shadows = false;
+					}
 
 					if (mat.is_valid() && RSG::storage->material_is_animated(mat)) {
 						is_animated = true;
+					}
+
+					if (mat.is_valid()) {
+						_update_instance_shader_parameters_from_material(isparams, p_instance->instance_shader_parameters, mat);
 					}
 
 					if (mat.is_valid()) {
@@ -2818,6 +3022,8 @@ void RenderingServerScene::_update_dirty_instance(Instance *p_instance) {
 									is_animated = true;
 								}
 
+								_update_instance_shader_parameters_from_material(isparams, p_instance->instance_shader_parameters, mat);
+
 								RSG::storage->material_update_dependency(mat, p_instance);
 							}
 						}
@@ -2840,6 +3046,22 @@ void RenderingServerScene::_update_dirty_instance(Instance *p_instance) {
 			}
 
 			geom->material_is_animated = is_animated;
+			p_instance->instance_shader_parameters = isparams;
+
+			if (p_instance->instance_allocated_shader_parameters != (p_instance->instance_shader_parameters.size() > 0)) {
+				p_instance->instance_allocated_shader_parameters = (p_instance->instance_shader_parameters.size() > 0);
+				if (p_instance->instance_allocated_shader_parameters) {
+					p_instance->instance_allocated_shader_parameters_offset = RSG::storage->global_variables_instance_allocate(p_instance->self);
+					for (Map<StringName, RasterizerScene::InstanceBase::InstanceShaderParameter>::Element *E = p_instance->instance_shader_parameters.front(); E; E = E->next()) {
+						if (E->get().value.get_type() != Variant::NIL) {
+							RSG::storage->global_variables_instance_update(p_instance->self, E->get().index, E->get().value);
+						}
+					}
+				} else {
+					RSG::storage->global_variables_instance_free(p_instance->self);
+					p_instance->instance_allocated_shader_parameters_offset = -1;
+				}
+			}
 		}
 
 		if (p_instance->skeleton.is_valid()) {
@@ -2901,6 +3123,10 @@ bool RenderingServerScene::free(RID p_rid) {
 		instance_geometry_set_material_override(p_rid, RID());
 		instance_attach_skeleton(p_rid, RID());
 
+		if (instance->instance_allocated_shader_parameters) {
+			//free the used shader parameters
+			RSG::storage->global_variables_instance_free(instance->self);
+		}
 		update_dirty_instances(); //in case something changed this
 
 		instance_owner.free(p_rid);

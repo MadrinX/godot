@@ -395,9 +395,9 @@ void AnimationPlayer::_animation_process_animation(AnimationData *p_anim, float 
 
 				} else {
 
-					nc->loc_accum = nc->loc_accum.linear_interpolate(loc, p_interp);
+					nc->loc_accum = nc->loc_accum.lerp(loc, p_interp);
 					nc->rot_accum = nc->rot_accum.slerp(rot, p_interp);
-					nc->scale_accum = nc->scale_accum.linear_interpolate(scale, p_interp);
+					nc->scale_accum = nc->scale_accum.lerp(scale, p_interp);
 				}
 
 			} break;
@@ -950,13 +950,13 @@ void AnimationPlayer::_animation_process(float p_delta) {
 				play(queued.front()->get());
 				String new_name = playback.assigned;
 				queued.pop_front();
-				if (end_notify)
+				if (end_notify || playback.seeked)
 					emit_signal(SceneStringNames::get_singleton()->animation_changed, old, new_name);
 			} else {
 				//stop();
 				playing = false;
 				_set_process(false);
-				if (end_notify)
+				if (end_notify || playback.seeked)
 					emit_signal(SceneStringNames::get_singleton()->animation_finished, playback.assigned);
 			}
 			end_reached = false;

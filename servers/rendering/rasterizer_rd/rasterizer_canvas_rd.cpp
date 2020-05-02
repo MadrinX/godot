@@ -273,7 +273,7 @@ RasterizerCanvas::PolygonID RasterizerCanvasRD::request_polygon(const Vector<int
 
 	Vector<uint8_t> polygon_buffer;
 	polygon_buffer.resize(buffer_size * sizeof(float));
-	Vector<RD::VertexDescription> descriptions;
+	Vector<RD::VertexAttribute> descriptions;
 	descriptions.resize(4);
 	Vector<RID> buffers;
 	buffers.resize(4);
@@ -284,7 +284,7 @@ RasterizerCanvas::PolygonID RasterizerCanvasRD::request_polygon(const Vector<int
 		uint32_t *uptr = (uint32_t *)r;
 		uint32_t base_offset = 0;
 		{ //vertices
-			RD::VertexDescription vd;
+			RD::VertexAttribute vd;
 			vd.format = RD::DATA_FORMAT_R32G32_SFLOAT;
 			vd.offset = base_offset * sizeof(float);
 			vd.location = RS::ARRAY_VERTEX;
@@ -304,7 +304,7 @@ RasterizerCanvas::PolygonID RasterizerCanvasRD::request_polygon(const Vector<int
 
 		//colors
 		if ((uint32_t)p_colors.size() == vertex_count || p_colors.size() == 1) {
-			RD::VertexDescription vd;
+			RD::VertexAttribute vd;
 			vd.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
 			vd.offset = base_offset * sizeof(float);
 			vd.location = RS::ARRAY_COLOR;
@@ -332,7 +332,7 @@ RasterizerCanvas::PolygonID RasterizerCanvasRD::request_polygon(const Vector<int
 			}
 			base_offset += 4;
 		} else {
-			RD::VertexDescription vd;
+			RD::VertexAttribute vd;
 			vd.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
 			vd.offset = 0;
 			vd.location = RS::ARRAY_COLOR;
@@ -344,7 +344,7 @@ RasterizerCanvas::PolygonID RasterizerCanvasRD::request_polygon(const Vector<int
 
 		//uvs
 		if ((uint32_t)p_uvs.size() == vertex_count) {
-			RD::VertexDescription vd;
+			RD::VertexAttribute vd;
 			vd.format = RD::DATA_FORMAT_R32G32_SFLOAT;
 			vd.offset = base_offset * sizeof(float);
 			vd.location = RS::ARRAY_TEX_UV;
@@ -360,7 +360,7 @@ RasterizerCanvas::PolygonID RasterizerCanvasRD::request_polygon(const Vector<int
 			}
 			base_offset += 2;
 		} else {
-			RD::VertexDescription vd;
+			RD::VertexAttribute vd;
 			vd.format = RD::DATA_FORMAT_R32G32_SFLOAT;
 			vd.offset = 0;
 			vd.location = RS::ARRAY_TEX_UV;
@@ -372,7 +372,7 @@ RasterizerCanvas::PolygonID RasterizerCanvasRD::request_polygon(const Vector<int
 
 		//bones
 		if ((uint32_t)p_indices.size() == vertex_count * 4 && (uint32_t)p_weights.size() == vertex_count * 4) {
-			RD::VertexDescription vd;
+			RD::VertexAttribute vd;
 			vd.format = RD::DATA_FORMAT_R32G32B32A32_UINT;
 			vd.offset = base_offset * sizeof(float);
 			vd.location = RS::ARRAY_BONES;
@@ -401,7 +401,7 @@ RasterizerCanvas::PolygonID RasterizerCanvasRD::request_polygon(const Vector<int
 
 			base_offset += 4;
 		} else {
-			RD::VertexDescription vd;
+			RD::VertexAttribute vd;
 			vd.format = RD::DATA_FORMAT_R32G32B32A32_UINT;
 			vd.offset = 0;
 			vd.location = RS::ARRAY_BONES;
@@ -616,6 +616,14 @@ void RasterizerCanvasRD::_render_item(RD::DrawListID p_draw_list, const Item *p_
 					u.ids.push_back(shader.default_skeleton_uniform_buffer);
 					uniforms.push_back(u);
 				}
+			}
+
+			{
+				RD::Uniform u;
+				u.type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+				u.binding = 7;
+				u.ids.push_back(storage->global_variables_get_storage_buffer());
+				uniforms.push_back(u);
 			}
 
 			//validate and update lighs if they are being used
@@ -2012,6 +2020,9 @@ void RasterizerCanvasRD::ShaderData::get_param_list(List<PropertyInfo> *p_param_
 
 	for (Map<StringName, ShaderLanguage::ShaderNode::Uniform>::Element *E = uniforms.front(); E; E = E->next()) {
 
+		if (E->get().scope != ShaderLanguage::ShaderNode::Uniform::SCOPE_LOCAL) {
+			continue;
+		}
 		if (E->get().texture_order >= 0) {
 			order[E->get().texture_order + 100000] = E->key();
 		} else {
@@ -2024,6 +2035,23 @@ void RasterizerCanvasRD::ShaderData::get_param_list(List<PropertyInfo> *p_param_
 		PropertyInfo pi = ShaderLanguage::uniform_to_property_info(uniforms[E->get()]);
 		pi.name = E->get();
 		p_param_list->push_back(pi);
+	}
+}
+
+void RasterizerCanvasRD::ShaderData::get_instance_param_list(List<RasterizerStorage::InstanceShaderParam> *p_param_list) const {
+
+	for (Map<StringName, ShaderLanguage::ShaderNode::Uniform>::Element *E = uniforms.front(); E; E = E->next()) {
+
+		if (E->get().scope != ShaderLanguage::ShaderNode::Uniform::SCOPE_INSTANCE) {
+			continue;
+		}
+
+		RasterizerStorage::InstanceShaderParam p;
+		p.info = ShaderLanguage::uniform_to_property_info(E->get());
+		p.info.name = E->key(); //supply name
+		p.index = E->get().instance_index;
+		p.default_value = ShaderLanguage::constant_value_to_variant(E->get().default_value, E->get().type, E->get().hint);
+		p_param_list->push_back(p);
 	}
 }
 
@@ -2366,6 +2394,8 @@ RasterizerCanvasRD::RasterizerCanvasRD(RasterizerStorageRD *p_storage) {
 		actions.default_repeat = ShaderLanguage::REPEAT_DISABLE;
 		actions.base_varying_index = 4;
 
+		actions.global_buffer_array_variable = "global_variables.data";
+
 		shader.compiler.initialize(actions);
 	}
 
@@ -2393,8 +2423,8 @@ RasterizerCanvasRD::RasterizerCanvasRD(RasterizerStorageRD *p_storage) {
 		}
 
 		//pipelines
-		Vector<RD::VertexDescription> vf;
-		RD::VertexDescription vd;
+		Vector<RD::VertexAttribute> vf;
+		RD::VertexAttribute vd;
 		vd.format = RD::DATA_FORMAT_R32G32B32_SFLOAT;
 		vd.location = 0;
 		vd.offset = 0;

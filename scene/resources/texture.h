@@ -213,7 +213,7 @@ public:
 
 class ResourceFormatLoaderStreamTexture : public ResourceFormatLoader {
 public:
-	virtual RES load(const String &p_path, const String &p_original_path = "", Error *r_error = nullptr, bool p_use_sub_threads = false, float *r_progress = nullptr);
+	virtual RES load(const String &p_path, const String &p_original_path = "", Error *r_error = nullptr, bool p_use_sub_threads = false, float *r_progress = nullptr, bool p_no_cache = false);
 	virtual void get_recognized_extensions(List<String> *p_extensions) const;
 	virtual bool handles_type(const String &p_type) const;
 	virtual String get_resource_type(const String &p_path) const;
@@ -421,7 +421,7 @@ public:
 		COMPRESSION_UNCOMPRESSED
 	};
 
-	virtual RES load(const String &p_path, const String &p_original_path = "", Error *r_error = nullptr, bool p_use_sub_threads = false, float *r_progress = nullptr);
+	virtual RES load(const String &p_path, const String &p_original_path = "", Error *r_error = nullptr, bool p_use_sub_threads = false, float *r_progress = nullptr, bool p_no_cache = false);
 	virtual void get_recognized_extensions(List<String> *p_extensions) const;
 	virtual bool handles_type(const String &p_type) const;
 	virtual String get_resource_type(const String &p_path) const;
@@ -567,7 +567,8 @@ private:
 	Frame frames[MAX_FRAMES];
 	int frame_count;
 	int current_frame;
-
+	bool pause;
+	bool oneshot;
 	float fps;
 
 	float time;
@@ -583,6 +584,15 @@ protected:
 public:
 	void set_frames(int p_frames);
 	int get_frames() const;
+
+	void set_current_frame(int p_frame);
+	int get_current_frame() const;
+
+	void set_pause(bool p_pause);
+	bool get_pause() const;
+
+	void set_oneshot(bool p_oneshot);
+	bool get_oneshot() const;
 
 	void set_frame_texture(int p_frame, const Ref<Texture2D> &p_texture);
 	Ref<Texture2D> get_frame_texture(int p_frame) const;

@@ -1179,14 +1179,32 @@ class EditorExportPlatformAndroid : public EditorExportPlatform {
 	static String _parse_string(const uint8_t *p_bytes, bool p_utf8) {
 
 		uint32_t offset = 0;
-		uint32_t len = decode_uint16(&p_bytes[offset]);
+		uint32_t len = 0;
 
 		if (p_utf8) {
-			//don't know how to read extended utf8, this will have to be for now
-			len >>= 8;
+			uint8_t byte = p_bytes[offset];
+			if (byte & 0x80)
+				offset += 2;
+			else
+				offset += 1;
+			byte = p_bytes[offset];
+			offset++;
+			if (byte & 0x80) {
+				len = byte & 0x7F;
+				len = (len << 8) + p_bytes[offset];
+				offset++;
+			} else {
+				len = byte;
+			}
+		} else {
+			len = decode_uint16(&p_bytes[offset]);
+			offset += 2;
+			if (len & 0x8000) {
+				len &= 0x7FFF;
+				len = (len << 16) + decode_uint16(&p_bytes[offset]);
+				offset += 2;
+			}
 		}
-		offset += 2;
-		//printf("len %i, unicode: %i\n",len,int(p_utf8));
 
 		if (p_utf8) {
 
@@ -1699,7 +1717,7 @@ public:
 				valid = false;
 			} else {
 				Error errn;
-				DirAccessRef da = DirAccess::open(sdk_path.plus_file("tools"), &errn);
+				DirAccessRef da = DirAccess::open(sdk_path.plus_file("platform-tools"), &errn);
 				if (errn != OK) {
 					err += TTR("Invalid Android SDK path for custom build in Editor Settings.") + "\n";
 					valid = false;
@@ -1932,6 +1950,7 @@ public:
 			ImageLoader::load_image(path, launcher_adaptive_icon_background_image);
 		}
 
+		Vector<String> invalid_abis(enabled_abis);
 		while (ret == UNZ_OK) {
 
 			//get filename
@@ -1977,6 +1996,7 @@ public:
 				bool enabled = false;
 				for (int i = 0; i < enabled_abis.size(); ++i) {
 					if (file.begins_with("lib/" + enabled_abis[i] + "/")) {
+						invalid_abis.erase(enabled_abis[i]);
 						enabled = true;
 						break;
 					}
@@ -2014,6 +2034,13 @@ public:
 			}
 
 			ret = unzGoToNextFile(pkg);
+		}
+
+		if (!invalid_abis.empty()) {
+			String unsupported_arch = String(", ").join(invalid_abis);
+			EditorNode::add_io_error("Missing libraries in the export template for the selected architectures: " + unsupported_arch + ".\n" +
+									 "Please build a template with all required libraries, or uncheck the missing architectures in the export preset.");
+			CLEANUP_AND_RETURN(ERR_FILE_NOT_FOUND);
 		}
 
 		if (ep.step("Adding files...", 1)) {

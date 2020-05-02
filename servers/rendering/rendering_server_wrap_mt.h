@@ -264,6 +264,20 @@ public:
 	FUNC2(reflection_probe_set_cull_mask, RID, uint32_t)
 	FUNC2(reflection_probe_set_resolution, RID, int)
 
+	/* DECAL API */
+
+	FUNCRID(decal)
+
+	FUNC2(decal_set_extents, RID, const Vector3 &)
+	FUNC3(decal_set_texture, RID, DecalTexture, RID)
+	FUNC2(decal_set_emission_energy, RID, float)
+	FUNC2(decal_set_albedo_mix, RID, float)
+	FUNC2(decal_set_modulate, RID, const Color &)
+	FUNC2(decal_set_cull_mask, RID, uint32_t)
+	FUNC4(decal_set_distance_fade, RID, bool, float, float)
+	FUNC3(decal_set_fade, RID, float, float)
+	FUNC2(decal_set_normal_fade, RID, float)
+
 	/* BAKED LIGHT API */
 
 	FUNCRID(gi_probe)
@@ -370,7 +384,7 @@ public:
 
 	FUNCRID(viewport)
 
-	FUNC2(viewport_set_use_arvr, RID, bool)
+	FUNC2(viewport_set_use_xr, RID, bool)
 
 	FUNC3(viewport_set_size, RID, int, int)
 
@@ -403,6 +417,7 @@ public:
 	FUNC2(viewport_set_shadow_atlas_size, RID, int)
 	FUNC3(viewport_set_shadow_atlas_quadrant_subdivision, RID, int, int)
 	FUNC2(viewport_set_msaa, RID, ViewportMSAA)
+	FUNC2(viewport_set_screen_space_aa, RID, ViewportScreenSpaceAA)
 
 	//this passes directly to avoid stalling, but it's pretty dangerous, so don't call after freeing a viewport
 	virtual int viewport_get_render_info(RID p_viewport, ViewportRenderInfo p_info) {
@@ -410,6 +425,14 @@ public:
 	}
 
 	FUNC2(viewport_set_debug_draw, RID, ViewportDebugDraw)
+
+	FUNC2(viewport_set_measure_render_time, RID, bool)
+	virtual float viewport_get_measured_render_time_cpu(RID p_viewport) const {
+		return rendering_server->viewport_get_measured_render_time_cpu(p_viewport);
+	}
+	virtual float viewport_get_measured_render_time_gpu(RID p_viewport) const {
+		return rendering_server->viewport_get_measured_render_time_gpu(p_viewport);
+	}
 
 	FUNC1(directional_shadow_atlas_set_size, int)
 
@@ -467,7 +490,8 @@ public:
 	FUNC8(camera_effects_set_dof_blur, RID, bool, float, float, bool, float, float, float)
 	FUNC3(camera_effects_set_custom_exposure, RID, bool, float)
 
-	FUNC1(shadow_filter_set, ShadowFilter)
+	FUNC1(shadows_quality_set, ShadowQuality);
+	FUNC1(directional_shadow_quality_set, ShadowQuality);
 
 	FUNCRID(scenario)
 
@@ -507,6 +531,11 @@ public:
 
 	FUNC5(instance_geometry_set_draw_range, RID, float, float, float, float)
 	FUNC2(instance_geometry_set_as_instance_lod, RID, RID)
+
+	FUNC3(instance_geometry_set_shader_parameter, RID, const StringName &, const Variant &)
+	FUNC2RC(Variant, instance_geometry_get_shader_parameter, RID, const StringName &)
+	FUNC2RC(Variant, instance_geometry_get_shader_parameter_default_value, RID, const StringName &)
+	FUNC2SC(instance_geometry_get_shader_parameter_list, RID, List<PropertyInfo> *)
 
 	/* CANVAS (2D) */
 
@@ -600,6 +629,18 @@ public:
 	FUNC2(canvas_occluder_polygon_set_shape_as_lines, RID, const Vector<Vector2> &)
 
 	FUNC2(canvas_occluder_polygon_set_cull_mode, RID, CanvasOccluderPolygonCullMode)
+
+	/* GLOBAL VARIABLES */
+
+	FUNC3(global_variable_add, const StringName &, GlobalVariableType, const Variant &)
+	FUNC1(global_variable_remove, const StringName &)
+	FUNC0RC(Vector<StringName>, global_variable_get_list)
+	FUNC2(global_variable_set, const StringName &, const Variant &)
+	FUNC2(global_variable_set_override, const StringName &, const Variant &)
+	FUNC1RC(GlobalVariableType, global_variable_get_type, const StringName &)
+	FUNC1RC(Variant, global_variable_get, const StringName &)
+	FUNC1(global_variables_load_settings, bool)
+	FUNC0(global_variables_clear)
 
 	/* BLACK BARS */
 
